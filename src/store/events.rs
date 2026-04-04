@@ -3,7 +3,10 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Local};
-use rusqlite::{Connection, Row, params, params_from_iter, types::{Type, Value}};
+use rusqlite::{
+    Connection, Row, params, params_from_iter,
+    types::{Type, Value},
+};
 
 use crate::types::Event;
 

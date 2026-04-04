@@ -119,7 +119,9 @@ pub fn update_item_status(conn: &Connection, id: &str, status: Status) -> Result
 pub fn update_item(conn: &Connection, id: &str, update: &ItemUpdate) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     let changed = apply_item_update(&tx, id, update)?;
-    if changed { tx.commit()?; }
+    if changed {
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -295,5 +297,4 @@ fn parse_optional_time(value: Option<String>) -> Result<Option<DateTime<Local>>>
 fn optional_text(value: Option<String>) -> Value {
     value.map(Value::from).unwrap_or(Value::Null)
 }
-
 fn now_text() -> String { Local::now().to_rfc3339() }
