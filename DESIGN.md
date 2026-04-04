@@ -1,0 +1,568 @@
+# ai-board: AI Engineering Backlog Manager
+
+## Overview
+
+`ai-board` is a persistent backlog/task-board for AI-driven engineering workflows. Unlike `aid` (which handles dispatch-level task execution), `ai-board` manages the **what** and **when** — the long-lived work items that span multiple `aid` dispatches, sessions, and days.
+
+**Primary user**: AI agents (API-first)
+**Secondary user**: Human administrators (web dashboard)
+
+### Problem Statement
+
+`aid` excels at "run this prompt on this agent now." But it lacks:
+1. **Persistent backlog** — what needs to be done across sessions?
+2. **Priority management** — what should be done next?
+3. **Progress tracking** — how much of a larger goal is complete?
+4. **Human oversight** — can a human reorder, approve, or veto work?
+5. **Cross-session continuity** — an agent finishing work today should know what's queued for tomorrow
+
+`ai-board` fills this gap as the planning/backlog layer that feeds into `aid` for execution.
+
+### Relationship to aid
+
+```
+Human Admin                AI Agent (Claude Code, etc.)
+    |                              |
+    |  [web dashboard]             |  [REST API]
+    v                              v
+ +-----------------------------------------+
+ |              ai-board                    |
+ |  backlog · priorities · dependencies    |
+ |  approval gates · progress tracking     |
+ +-----------------------------------------+
+            |                    ^
+            | dispatch           | completion callback
+            v                    |
+ +-----------------------------------------+
+ |                aid                       |
+ |  agent dispatch · execution · worktrees |
+ +-----------------------------------------+
+            |
+            v
+     AI CLI Agents (codex, gemini, cursor, ...)
+```
+
+---
+
+## Core Concepts
+
+### Work Item (not "task" — avoids confusion with aid tasks)
+
+A work item represents a unit of engineering work. It can be as small as "fix typo in README" or as large as "implement authentication system" (which would have sub-items).
+
+```
+WorkItem {
+    id: "wi-a3f8"               // short hex ID
+    title: String
+    description: String          // markdown, can include acceptance criteria
+    status: Status               // backlog → ready → active → review → done
+    priority: Priority           // critical > high > medium > low
+    position: f64                // fractional ordering within status column
+    labels: Vec<String>          // ["bug", "frontend", "v2"]
+    
+    // Hierarchy
+    parent_id: Option<WorkItemId>
+    depends_on: Vec<WorkItemId>  // blocked until these are done
+    blocks: Vec<WorkItemId>      // computed inverse
+    
+    // Execution link
+    aid_task_ids: Vec<String>    // linked aid dispatches
+    aid_agent: Option<String>    // preferred agent for dispatch
+    
+    // Effort
+    estimate: Option<Estimate>   // t-shirt size or hours
+    
+    // Ownership
+    assignee: Option<String>     // "agent:claude", "human:ming", or unassigned
+    created_by: String
+    
+    // Gates
+    requires_approval: bool      // human must approve before dispatch
+    auto_dispatch: bool          // automatically dispatch when ready
+    
+    // Timestamps
+    created_at, updated_at, started_at, completed_at
+    due_date: Option<Date>
+}
+```
+
+### Status Flow
+
+```
+backlog → ready → active → review → done
+                    ↓         ↓
+                  blocked   rejected → ready (re-queued)
+```
+
+| Status | Meaning |
+|--------|---------|
+| `backlog` | Known work, not yet prioritized |
+| `ready` | Prioritized and unblocked, can be picked up |
+| `active` | Currently being worked on (aid task dispatched) |
+| `review` | Work complete, awaiting human review |
+| `done` | Accepted and closed |
+| `blocked` | Waiting on dependency or external input |
+| `rejected` | Review failed, needs rework |
+
+### Board (View)
+
+A board is a saved view/filter over work items. Multiple boards can exist.
+
+```
+Board {
+    id: "bd-01"
+    name: String                 // "Sprint 12", "Bug Triage", "v2 Roadmap"
+    filter: Filter               // status, labels, assignee, date range
+    sort: SortOrder              // priority, position, created_at, due_date
+    columns: Vec<StatusColumn>   // which statuses to show as columns
+}
+```
+
+### Event Log
+
+Every state change is recorded for auditability.
+
+```
+Event {
+    id, timestamp
+    item_id: WorkItemId
+    actor: String                // "agent:claude", "human:ming", "system"
+    action: Action               // created, status_changed, priority_changed, ...
+    detail: String               // human-readable description
+    metadata: Option<JSON>       // structured data (old/new values, aid task id, etc.)
+}
+```
+
+---
+
+## Architecture
+
+### Tech Stack
+
+| Layer | Choice | Rationale |
+|-------|--------|-----------|
+| Language | Rust | Consistent with aid, shared types possible |
+| Web framework | Axum | Already proven in aid, async, performant |
+| Database | SQLite | Portable, zero-ops, sufficient for single-team scale |
+| Frontend | Embedded SPA (Leptos or vanilla JS + htmx) | Single binary deployment, no Node.js required |
+| Real-time | SSE (Server-Sent Events) | Proven in aid, simpler than WebSocket for read-heavy updates |
+| API | REST + JSON | Agent-friendly, simple, well-understood |
+
+### Single Binary
+
+Like `aid`, `ai-board` ships as a single binary with the web UI embedded via `rust-embed`. No separate frontend build step in production.
+
+```bash
+ai-board serve                    # start server on :3100
+ai-board serve --port 3200        # custom port
+ai-board item create "Fix parser" --priority high --label bug
+ai-board item list --status ready
+ai-board next                     # show highest-priority ready item
+```
+
+### Directory Structure
+
+```
+ai-board/
+├── Cargo.toml
+├── DESIGN.md                     # this file
+├── CLAUDE.md                     # dev instructions
+├── src/
+│   ├── main.rs                   # CLI entry + server boot
+│   ├── cli.rs                    # CLI argument parsing (clap)
+│   ├── types.rs                  # WorkItem, Status, Priority, Event, Board
+│   ├── store/
+│   │   ├── mod.rs                # SQLite connection + pool
+│   │   ├── schema.rs             # table definitions + migrations
+│   │   ├── items.rs              # work item CRUD
+│   │   ├── events.rs             # event log queries
+│   │   └── boards.rs             # board/view CRUD
+│   ├── api/
+│   │   ├── mod.rs                # Axum router setup
+│   │   ├── items.rs              # /api/items endpoints
+│   │   ├── boards.rs             # /api/boards endpoints
+│   │   ├── agent.rs              # /api/agent/* (agent-facing endpoints)
+│   │   └── sse.rs                # SSE event stream
+│   ├── web/
+│   │   ├── mod.rs                # embedded static file serving
+│   │   └── static/               # frontend assets
+│   │       ├── index.html
+│   │       ├── app.js            # or app.wasm if Leptos
+│   │       └── style.css
+│   └── integration/
+│       ├── mod.rs
+│       └── aid.rs                # aid integration (dispatch, callback)
+└── tests/
+    └── api_tests.rs
+```
+
+---
+
+## API Design
+
+### Agent-Facing Endpoints (primary user)
+
+These are what AI agents call to manage their work queue.
+
+```
+GET    /api/agent/next                    # get highest-priority ready item
+GET    /api/agent/next?label=bug          # filtered
+POST   /api/agent/items/{id}/claim        # claim item (status → active)
+POST   /api/agent/items/{id}/complete     # mark done with summary
+POST   /api/agent/items/{id}/block        # report blocker
+POST   /api/agent/items/{id}/submit       # submit for review
+POST   /api/agent/items/{id}/note         # add progress note
+GET    /api/agent/context/{id}            # get item + deps + history for prompt injection
+```
+
+#### `GET /api/agent/next` Response
+
+```json
+{
+    "item": {
+        "id": "wi-a3f8",
+        "title": "Fix parser edge case with empty input",
+        "description": "The parser panics on empty string input...",
+        "priority": "high",
+        "labels": ["bug", "parser"],
+        "depends_on": [],
+        "context": "Related to wi-b2c1 (parser refactor)"
+    },
+    "dispatch_hint": {
+        "agent": "codex",
+        "scope": ["src/parser/"],
+        "verify": "cargo test -p parser"
+    }
+}
+```
+
+#### `POST /api/agent/items/{id}/complete` Request
+
+```json
+{
+    "summary": "Fixed empty input handling by adding early return",
+    "aid_task_id": "t-1a2b",
+    "evidence": "All parser tests pass, added 3 new test cases",
+    "files_changed": ["src/parser/mod.rs", "tests/parser_test.rs"]
+}
+```
+
+### Human-Facing Endpoints (dashboard)
+
+```
+# Items
+GET    /api/items                         # list items (filterable)
+GET    /api/items/{id}                    # get item details
+POST   /api/items                         # create item
+PATCH  /api/items/{id}                    # update item
+DELETE /api/items/{id}                    # delete item
+POST   /api/items/{id}/approve            # approve reviewed item → done
+POST   /api/items/{id}/reject             # reject → ready (with feedback)
+PATCH  /api/items/reorder                 # batch update positions
+
+# Boards
+GET    /api/boards                        # list boards
+GET    /api/boards/{id}                   # get board with items
+POST   /api/boards                        # create board
+PATCH  /api/boards/{id}                   # update board
+
+# Events
+GET    /api/items/{id}/events             # item history
+GET    /api/events                        # global event stream
+
+# Stats
+GET    /api/stats                         # throughput, velocity, agent performance
+
+# SSE
+GET    /api/stream                        # real-time updates
+```
+
+### Reorder Mechanism
+
+Position uses fractional indexing (like Linear/Figma):
+- Items have `position: f64` within each status column
+- Moving item between two items: `new_pos = (above.pos + below.pos) / 2`
+- Periodic rebalancing when positions get too close (< 0.001 apart)
+- Drag-and-drop on dashboard sends `PATCH /api/items/reorder` with `[{id, position, status}]`
+
+---
+
+## Web Dashboard
+
+### Design Principles
+
+1. **Read-optimized** — human views the board, agents do the writing
+2. **Real-time** — SSE pushes updates, no manual refresh needed
+3. **Minimal** — not trying to be Jira; focused on priority queue + status tracking
+4. **Mobile-friendly** — check status from phone
+
+### Views
+
+#### 1. Board View (default)
+Kanban columns: `ready | active | review | done`
+- Cards show: title, priority badge, labels, assignee, linked aid task status
+- Drag-and-drop to reorder within column or move between columns
+- Click card → detail panel (right sidebar or modal)
+
+#### 2. List View
+Table with sortable columns: priority, title, status, assignee, created, updated
+- Bulk actions: select multiple → change status/priority/label
+- Inline editing for quick changes
+
+#### 3. Timeline View (future)
+Gantt-style view for items with due dates and dependencies
+- Show dependency arrows
+- Highlight blocked items
+
+### Detail Panel
+- Full description (markdown rendered)
+- Activity log (events)
+- Linked aid tasks with status
+- Sub-items (if parent)
+- Edit controls (status, priority, labels, assignee)
+- Approve/reject buttons (for items in review)
+
+### Filters
+- Status, priority, label, assignee
+- Created/updated date range
+- Has blockers / is blocked
+- Free text search (title + description)
+
+---
+
+## aid Integration
+
+### Option A: Loose Coupling (Recommended for v1)
+
+`ai-board` and `aid` are independent binaries that communicate via:
+1. **CLI bridge**: `ai-board` can invoke `aid run` to dispatch work
+2. **Webhook/callback**: `aid` calls `ai-board` API on task completion
+3. **Shared SQLite**: optional, read `aid`'s DB for task status display
+
+```bash
+# Agent workflow:
+# 1. Query ai-board for next item
+item=$(curl -s localhost:3100/api/agent/next | jq -r '.item.id')
+
+# 2. Dispatch via aid
+aid run codex "$(curl -s localhost:3100/api/agent/context/$item)" \
+    --on-done "curl -X POST localhost:3100/api/agent/items/$item/complete"
+
+# 3. ai-board auto-updates when aid task finishes
+```
+
+### Option B: Tight Coupling (future)
+
+Shared Rust crate (`ai-common`) with types + store, allowing:
+- `aid` to directly query `ai-board`'s backlog
+- `ai-board` to embed `aid`'s dispatch engine
+- Single unified database
+
+### Hook Integration
+
+`aid`'s hook system can trigger `ai-board` updates:
+
+```json
+// .aid/hooks.toml
+[[hook]]
+event = "task.completed"
+command = "curl -X POST localhost:3100/api/agent/items/${ITEM_ID}/complete -d '{\"aid_task_id\": \"${TASK_ID}\"}'"
+```
+
+### Claude Code Integration
+
+The orchestrator (Claude Code as 老张) can use both tools:
+
+```bash
+# Check what to work on
+curl localhost:3100/api/agent/next
+
+# Dispatch via aid
+aid run codex "..." --on-done "curl -X POST localhost:3100/api/..."
+
+# Or, ai-board CLI directly
+ai-board next                     # what's next?
+ai-board dispatch wi-a3f8         # auto-dispatch highest-priority item via aid
+```
+
+---
+
+## Data Model (SQLite Schema)
+
+```sql
+CREATE TABLE items (
+    id TEXT PRIMARY KEY,           -- "wi-xxxx"
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'backlog',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    position REAL NOT NULL DEFAULT 0.0,
+    parent_id TEXT REFERENCES items(id),
+    assignee TEXT,
+    created_by TEXT NOT NULL,
+    requires_approval INTEGER DEFAULT 0,
+    auto_dispatch INTEGER DEFAULT 0,
+    estimate TEXT,                  -- "S", "M", "L", "XL" or hours
+    aid_agent TEXT,                 -- preferred agent
+    aid_verify TEXT,                -- verify command
+    due_date TEXT,                  -- ISO date
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE TABLE item_labels (
+    item_id TEXT REFERENCES items(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    PRIMARY KEY (item_id, label)
+);
+
+CREATE TABLE item_dependencies (
+    item_id TEXT REFERENCES items(id) ON DELETE CASCADE,
+    depends_on TEXT REFERENCES items(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, depends_on)
+);
+
+CREATE TABLE item_aid_tasks (
+    item_id TEXT REFERENCES items(id) ON DELETE CASCADE,
+    aid_task_id TEXT NOT NULL,
+    status TEXT,                    -- mirrored from aid
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (item_id, aid_task_id)
+);
+
+CREATE TABLE events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT REFERENCES items(id) ON DELETE CASCADE,
+    actor TEXT NOT NULL,            -- "agent:claude", "human:ming"
+    action TEXT NOT NULL,           -- "created", "status_changed", etc.
+    detail TEXT,
+    metadata TEXT,                  -- JSON
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE boards (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    filter TEXT,                    -- JSON filter spec
+    sort_by TEXT DEFAULT 'position',
+    columns TEXT,                   -- JSON array of statuses
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Indexes
+CREATE INDEX idx_items_status ON items(status);
+CREATE INDEX idx_items_priority ON items(priority);
+CREATE INDEX idx_items_parent ON items(parent_id);
+CREATE INDEX idx_items_position ON items(status, position);
+CREATE INDEX idx_events_item ON events(item_id);
+CREATE INDEX idx_events_created ON events(created_at);
+CREATE INDEX idx_labels_label ON item_labels(label);
+```
+
+---
+
+## Development Phases
+
+### Phase 1: Core + CLI (week 1-2)
+- [ ] Project scaffold (Cargo.toml, types, store)
+- [ ] SQLite store with migrations
+- [ ] Work item CRUD
+- [ ] CLI commands: `item create/list/show/update/delete`, `next`
+- [ ] Event logging
+- [ ] Priority queue logic (next item selection)
+- [ ] Dependency tracking and blocked status
+
+### Phase 2: REST API (week 2-3)
+- [ ] Axum server with item endpoints
+- [ ] Agent-facing endpoints (`/api/agent/*`)
+- [ ] SSE event stream
+- [ ] Board CRUD
+- [ ] Reorder/position management
+
+### Phase 3: Web Dashboard (week 3-5)
+- [ ] Embedded SPA (index.html + JS)
+- [ ] Board (kanban) view with drag-and-drop
+- [ ] List view with sorting/filtering
+- [ ] Item detail panel
+- [ ] Real-time updates via SSE
+- [ ] Responsive/mobile layout
+
+### Phase 4: aid Integration (week 5-6)
+- [ ] `ai-board dispatch` command (invoke aid)
+- [ ] Hook-based completion callback
+- [ ] Aid task status mirroring
+- [ ] Auto-dispatch for `auto_dispatch: true` items
+
+### Phase 5: Advanced (future)
+- [ ] Timeline/dependency visualization
+- [ ] Velocity/throughput metrics
+- [ ] Agent performance analytics
+- [ ] Multi-project support
+- [ ] Approval workflow with notifications
+- [ ] Import/export (markdown, CSV)
+- [ ] MCP server mode (for agent tool access)
+
+---
+
+## Key Design Decisions
+
+### Why not extend aid?
+
+`aid` is an **execution engine** — it's fast, stateless per dispatch, and optimized for fire-and-forget. Adding long-lived backlog management would:
+1. Bloat aid's already large binary (269 source files)
+2. Mix concerns (execution vs. planning)
+3. Force aid's task model to accommodate both short-lived dispatches and long-lived work items
+
+Separate tools, single workflow. Unix philosophy.
+
+### Why SQLite (not Postgres)?
+
+- Single binary deployment, zero ops
+- Sufficient for single-team / single-machine scale
+- Consistent with aid's approach
+- WAL mode handles concurrent reads well
+- If scale demands it later, migrate to Postgres (schema is compatible)
+
+### Why REST (not GraphQL)?
+
+- AI agents work better with simple REST — predictable URLs, standard HTTP methods
+- No query complexity for the client to manage
+- GraphQL shines for complex frontend queries, but our frontend is simple
+- REST is easier to call from shell scripts and `curl`
+
+### Why embedded frontend (not separate)?
+
+- Single `cargo build` produces everything
+- No Node.js, npm, or build toolchain for the frontend
+- Deployable as a single binary anywhere
+- Trade-off: less frontend ecosystem, but the UI is intentionally simple
+
+### Fractional Indexing for Position
+
+Instead of integer positions (which require renumbering on insert), use f64:
+- Between items at 1.0 and 2.0 → insert at 1.5
+- Rebalance when gap < 0.001
+- Same approach used by Linear, Figma, and Notion
+
+---
+
+## Non-Goals (v1)
+
+- Multi-user authentication (single-team, localhost)
+- Notifications (email, Slack) — use aid's existing notification infra
+- Time tracking
+- Git integration (that's aid's job)
+- Billing/invoicing
+- Cloud hosting (local-first, maybe later)
+
+---
+
+## Open Questions
+
+1. **Frontend tech**: Leptos (Rust WASM) vs vanilla JS + htmx? Leptos is more Rust-native but adds compile complexity. htmx is simpler but less interactive for drag-and-drop.
+2. **MCP integration**: Should ai-board expose an MCP server so Claude Code can use it as a tool directly (without curl)?
+3. **Multi-repo**: Should boards be per-repo or global? aid is per-repo for dispatch but this is a planning tool.
+4. **Naming**: `ai-board` vs alternatives (`aideck`, `ai-plan`, `ai-backlog`)?

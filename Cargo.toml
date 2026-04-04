@@ -1,0 +1,40 @@
+[package]
+name = "ai-board"
+version = "0.1.0"
+edition = "2024"
+description = "AI engineering backlog manager — persistent task board for AI agents with human oversight dashboard"
+license = "MIT"
+default-run = "ai-board"
+
+[[bin]]
+name = "ai-board"
+path = "src/main.rs"
+
+[dependencies]
+# Web
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Embedded web assets
+rust-embed = "8"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+rand = "0.9"
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
