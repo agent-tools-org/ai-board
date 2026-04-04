@@ -14,7 +14,7 @@ path = "src/main.rs"
 # Web
 axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -33,6 +33,9 @@ chrono = { version = "0.4", features = ["serde"] }
 rust-embed = "8"
 
 # Utilities
+anyhow = "1"
+async-stream = "0.3"
+futures-core = "0.3"
 uuid = { version = "1", features = ["v4"] }
 rand = "0.9"
 
