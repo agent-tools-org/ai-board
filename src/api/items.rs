@@ -22,9 +22,9 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/items", get(list).post(create))
         .route("/api/items/reorder", patch(reorder))
-        .route("/api/items/:id", get(show).patch(update).delete(remove))
-        .route("/api/items/:id/approve", post(approve))
-        .route("/api/items/:id/reject", post(reject))
+        .route("/api/items/{id}", get(show).patch(update).delete(remove))
+        .route("/api/items/{id}/approve", post(approve))
+        .route("/api/items/{id}/reject", post(reject))
 }
 
 #[derive(Deserialize)]

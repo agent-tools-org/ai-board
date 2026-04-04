@@ -232,8 +232,18 @@ fn handle_next(args: NextArgs) -> Result<()> {
 }
 
 fn handle_serve(args: ServeArgs) -> Result<()> {
-    println!("Starting server on :{}", args.port);
-    Ok(())
+    let store = open_store()?;
+    let state = std::sync::Arc::new(store);
+    let app = crate::api::router(state);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], args.port));
+    println!("ai-board server running on http://{addr}");
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let listener = tokio::net::TcpListener::bind(addr).await?;
+            axum::serve(listener, app).await.map_err(|e| anyhow!(e))
+        })
 }
 
 fn handle_init() -> Result<()> {

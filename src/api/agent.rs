@@ -18,11 +18,11 @@ use crate::{
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/agent/next", get(next_ready))
-        .route("/api/agent/items/:id/claim", post(claim))
-        .route("/api/agent/items/:id/complete", post(complete))
-        .route("/api/agent/items/:id/block", post(block))
-        .route("/api/agent/items/:id/submit", post(submit))
-        .route("/api/agent/items/:id/note", post(note))
+        .route("/api/agent/items/{id}/claim", post(claim))
+        .route("/api/agent/items/{id}/complete", post(complete))
+        .route("/api/agent/items/{id}/block", post(block))
+        .route("/api/agent/items/{id}/submit", post(submit))
+        .route("/api/agent/items/{id}/note", post(note))
 }
 
 #[derive(Deserialize)]
