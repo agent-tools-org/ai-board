@@ -18,6 +18,7 @@ dependencies = [
 name = "ai-board"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "chrono",
  "clap",

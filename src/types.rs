@@ -10,7 +10,7 @@ pub type WorkItemId = String;
 /// Short hex ID for boards (e.g., "bd-01")
 pub type BoardId = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
     Backlog,
@@ -22,7 +22,7 @@ pub enum Status {
     Rejected,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum Priority {
     Low,
