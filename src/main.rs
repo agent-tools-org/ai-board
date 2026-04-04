@@ -1,6 +1,7 @@
 // ai-board CLI entrypoint and command dispatch.
 // Wires clap parsing to the SQLite store and terminal rendering.
 
+mod api;
 mod cli;
 mod render;
 mod store;
