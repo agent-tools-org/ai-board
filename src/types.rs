@@ -34,6 +34,7 @@ pub enum Priority {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkItem {
     pub id: WorkItemId,
+    pub repo_path: String,
     pub title: String,
     pub description: String,
     pub status: Status,
