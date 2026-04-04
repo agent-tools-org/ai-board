@@ -3,6 +3,7 @@
 
 mod api;
 mod cli;
+mod mcp;
 mod render;
 mod store;
 mod types;
@@ -21,6 +22,7 @@ use crate::types::{Priority, Status, WorkItem};
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Item { command } => handle_item(command),
+        Command::Mcp => handle_mcp(),
         Command::Next(args) => handle_next(args),
         Command::Serve(args) => handle_serve(args),
         Command::Init => handle_init(),
@@ -254,6 +256,14 @@ fn handle_init() -> Result<()> {
     let _ = Store::open_default()?;
     println!("Initialized {}", path.display());
     Ok(())
+}
+
+fn handle_mcp() -> Result<()> {
+    let store = std::sync::Arc::new(open_store()?);
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(crate::mcp::run_server(store))
 }
 
 fn open_store() -> Result<Store> {

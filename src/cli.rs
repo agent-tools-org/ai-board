@@ -18,6 +18,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ItemCommand,
     },
+    Mcp,
     Next(NextArgs),
     Serve(ServeArgs),
     Init,
