@@ -128,9 +128,9 @@ fn handle_create(
         completed_at: None,
         due_date,
     };
-    crate::store::insert_item(store.connection(), &item)?;
+    crate::store::insert_item(&store.connection(), &item)?;
     crate::store::insert_event(
-        store.connection(),
+        &store.connection(),
         &item.id,
         "human:cli",
         "created",
@@ -149,15 +149,15 @@ fn handle_list(
     limit: usize,
 ) -> Result<()> {
     let store = open_store()?;
-    let items = crate::store::list_items(store.connection(), &item_filter(status, priority, label, assignee, limit)?)?;
+    let items = crate::store::list_items(&store.connection(), &item_filter(status, priority, label, assignee, limit)?)?;
     print_list(&items);
     Ok(())
 }
 
 fn handle_show(id: &str) -> Result<()> {
     let store = open_store()?;
-    let item = load_item(store.connection(), id)?;
-    let events = crate::store::list_events(store.connection(), id, Some(20))?;
+    let item = load_item(&store.connection(), id)?;
+    let events = crate::store::list_events(&store.connection(), id, Some(20))?;
     print_item(&item, &events);
     Ok(())
 }
@@ -173,9 +173,9 @@ fn handle_update(
     position: Option<f64>,
 ) -> Result<()> {
     let store = open_store()?;
-    let _ = load_item(store.connection(), id)?;
+    let _ = load_item(&store.connection(), id)?;
     crate::store::update_item(
-        store.connection(),
+        &store.connection(),
         id,
         &ItemUpdate {
             repo_path: None,
@@ -197,10 +197,10 @@ fn handle_update(
         },
     )?;
     if let Some(status) = status {
-        crate::store::update_item_status(store.connection(), id, status)?;
+        crate::store::update_item_status(&store.connection(), id, status)?;
     }
     crate::store::insert_event(
-        store.connection(),
+        &store.connection(),
         id,
         "human:cli",
         "updated",
@@ -213,17 +213,17 @@ fn handle_update(
 
 fn handle_delete(id: &str) -> Result<()> {
     let store = open_store()?;
-    let _ = load_item(store.connection(), id)?;
-    crate::store::delete_item(store.connection(), id)?;
+    let _ = load_item(&store.connection(), id)?;
+    crate::store::delete_item(&store.connection(), id)?;
     println!("Deleted {id}");
     Ok(())
 }
 
 fn handle_next(args: NextArgs) -> Result<()> {
     let store = open_store()?;
-    match crate::store::next_item(store.connection(), &repo_path()?, args.label.as_deref())? {
+    match crate::store::next_item(&store.connection(), &repo_path()?, args.label.as_deref())? {
         Some(item) => {
-            let events = crate::store::list_events(store.connection(), &item.id, Some(10))?;
+            let events = crate::store::list_events(&store.connection(), &item.id, Some(10))?;
             print_item(&item, &events);
         }
         None => println!("No ready items"),
