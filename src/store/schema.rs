@@ -9,6 +9,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         "
         CREATE TABLE IF NOT EXISTS items (
             id TEXT PRIMARY KEY,
+            project TEXT NOT NULL DEFAULT '',
             repo_path TEXT NOT NULL,
             title TEXT NOT NULL,
             description TEXT DEFAULT '',
@@ -77,5 +78,28 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_item_labels_label ON item_labels(label);
         ",
     )?;
+    migrate_items_project(conn)?;
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_items_project ON items(project);
+        CREATE INDEX IF NOT EXISTS idx_items_project_status_position ON items(project, status, position);
+        ",
+    )?;
+    Ok(())
+}
+
+fn migrate_items_project(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(items)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let has_project = columns
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .any(|column| column == "project");
+    if !has_project {
+        conn.execute(
+            "ALTER TABLE items ADD COLUMN project TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
     Ok(())
 }

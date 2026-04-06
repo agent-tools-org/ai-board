@@ -32,66 +32,20 @@ fn main() -> Result<()> {
 
 fn handle_item(command: ItemCommand) -> Result<()> {
     match command {
-        ItemCommand::Create {
-            title,
-            description,
-            priority,
-            label,
-            parent,
-            depends_on,
-            assignee,
-            agent,
-            verify,
-            estimate,
-            due_date,
-            auto_dispatch,
-        } => handle_create(
-            title,
-            description,
-            priority,
-            label,
-            parent,
-            depends_on,
-            assignee,
-            agent,
-            verify,
-            estimate,
-            due_date,
-            auto_dispatch,
-        ),
-        ItemCommand::List {
-            status,
-            priority,
-            label,
-            assignee,
-            limit,
-        } => handle_list(status, priority, label, assignee, limit),
+        ItemCommand::Create { title, project, description, priority, label, parent, depends_on, assignee, agent, verify, estimate, due_date, auto_dispatch } =>
+            handle_create(title, project, description, priority, label, parent, depends_on, assignee, agent, verify, estimate, due_date, auto_dispatch),
+        ItemCommand::List { project, status, priority, label, assignee, limit } =>
+            handle_list(project, status, priority, label, assignee, limit),
         ItemCommand::Show { id } => handle_show(&id),
-        ItemCommand::Update {
-            id,
-            title,
-            description,
-            priority,
-            status,
-            label,
-            assignee,
-            position,
-        } => handle_update(
-            &id,
-            title,
-            description,
-            priority,
-            status,
-            label,
-            assignee,
-            position,
-        ),
+        ItemCommand::Update { id, title, description, priority, status, label, assignee, position } =>
+            handle_update(&id, title, description, priority, status, label, assignee, position),
         ItemCommand::Delete { id } => handle_delete(&id),
     }
 }
 
 fn handle_create(
     title: String,
+    project: Option<String>,
     description: Option<String>,
     priority: Priority,
     label: Vec<String>,
@@ -108,6 +62,7 @@ fn handle_create(
     let now = Local::now();
     let item = WorkItem {
         id: crate::store::gen_id(),
+        project: detect_project(project)?,
         repo_path: repo_path()?,
         title,
         description: description.unwrap_or_default(),
@@ -132,19 +87,13 @@ fn handle_create(
         due_date,
     };
     crate::store::insert_item(&store.connection(), &item)?;
-    crate::store::insert_event(
-        &store.connection(),
-        &item.id,
-        "human:cli",
-        "created",
-        Some("Created via CLI"),
-        None,
-    )?;
+    crate::store::insert_event(&store.connection(), &item.id, "human:cli", "created", Some("Created via CLI"), None)?;
     println!("Created {}", item.id);
     Ok(())
 }
 
 fn handle_list(
+    project: Option<String>,
     status: Option<Status>,
     priority: Option<Priority>,
     label: Option<String>,
@@ -152,7 +101,7 @@ fn handle_list(
     limit: usize,
 ) -> Result<()> {
     let store = open_store()?;
-    let items = crate::store::list_items(&store.connection(), &item_filter(status, priority, label, assignee, limit)?)?;
+    let items = crate::store::list_items(&store.connection(), &item_filter(project, status, priority, label, assignee, limit)?)?;
     print_list(&items);
     Ok(())
 }
@@ -181,6 +130,7 @@ fn handle_update(
         &store.connection(),
         id,
         &ItemUpdate {
+            project: None,
             repo_path: None,
             title,
             description,
@@ -199,17 +149,8 @@ fn handle_update(
             due_date: None,
         },
     )?;
-    if let Some(status) = status {
-        crate::store::update_item_status(&store.connection(), id, status)?;
-    }
-    crate::store::insert_event(
-        &store.connection(),
-        id,
-        "human:cli",
-        "updated",
-        Some("Updated via CLI"),
-        None,
-    )?;
+    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status)?; }
+    crate::store::insert_event(&store.connection(), id, "human:cli", "updated", Some("Updated via CLI"), None)?;
     println!("Updated {id}");
     Ok(())
 }
@@ -224,11 +165,9 @@ fn handle_delete(id: &str) -> Result<()> {
 
 fn handle_next(args: NextArgs) -> Result<()> {
     let store = open_store()?;
-    match crate::store::next_item(&store.connection(), &repo_path()?, args.label.as_deref())? {
-        Some(item) => {
-            let events = crate::store::list_events(&store.connection(), &item.id, Some(10))?;
-            print_item(&item, &events);
-        }
+    let project = detect_project(args.project)?;
+    match crate::store::next_item(&store.connection(), &project, args.label.as_deref())? {
+        Some(item) => print_item(&item, &crate::store::list_events(&store.connection(), &item.id, Some(10))?),
         None => println!("No ready items"),
     }
     Ok(())
@@ -250,9 +189,7 @@ fn handle_serve(args: ServeArgs) -> Result<()> {
 }
 
 fn handle_init() -> Result<()> {
-    let path = env::current_dir()
-        .context("failed to get current directory")?
-        .join(".ai-board");
+    let path = board_dir()?;
     fs::create_dir_all(&path)?;
     let _ = Store::open_default()?;
     println!("Initialized {}", path.display());
@@ -268,11 +205,17 @@ fn handle_mcp() -> Result<()> {
 }
 
 fn open_store() -> Result<Store> {
-    Store::open_default().context("failed to open .ai-board store")
+    Store::open_default().context("failed to open ai-board store")
 }
 
 fn load_item(conn: &rusqlite::Connection, id: &str) -> Result<WorkItem> {
     crate::store::get_item(conn, id)?.ok_or_else(|| anyhow!("work item not found: {id}"))
+}
+
+fn detect_project(explicit: Option<String>) -> Result<String> {
+    if let Some(project) = explicit { return Ok(project); }
+    let dir = env::current_dir()?;
+    dir.file_name().and_then(|name| name.to_str()).map(str::to_owned).ok_or_else(|| anyhow!("cannot detect project name from current directory"))
 }
 
 fn repo_path() -> Result<String> {
@@ -282,20 +225,17 @@ fn repo_path() -> Result<String> {
         .map_err(|_| anyhow!("current directory is not valid UTF-8"))?)
 }
 
+fn board_dir() -> Result<std::path::PathBuf> {
+    env::var_os("HOME").map(std::path::PathBuf::from).map(|path| path.join(".ai-board")).ok_or_else(|| anyhow!("HOME is not set"))
+}
+
 fn item_filter(
+    project: Option<String>,
     status: Option<Status>,
     priority: Option<Priority>,
     label: Option<String>,
     assignee: Option<String>,
     limit: usize,
 ) -> Result<ItemFilter> {
-    Ok(ItemFilter {
-        status,
-        priority,
-        label,
-        assignee,
-        parent_id: None,
-        repo_path: Some(repo_path()?),
-        limit: Some(limit),
-    })
+    Ok(ItemFilter { status, priority, label, assignee, parent_id: None, project: Some(detect_project(project)?), repo_path: None, limit: Some(limit) })
 }

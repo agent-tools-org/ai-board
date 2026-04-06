@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::{
-    api::{ApiError, AppState, agent_actor, default_repo_path, missing_item},
+    api::{ApiError, AppState, agent_actor, default_project, missing_item},
     store::{ItemUpdate, get_item, insert_event, next_item, update_item, update_item_status},
     types::{Status, WorkItem},
 };
@@ -27,8 +27,8 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct NextQuery {
+    project: Option<String>,
     label: Option<String>,
-    repo_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -63,9 +63,10 @@ async fn next_ready(
     State(store): State<AppState>,
     Query(query): Query<NextQuery>,
 ) -> Result<Json<WorkItem>, ApiError> {
-    let repo_path = default_repo_path(query.repo_path)?;
+    let project = default_project(query.project)
+        .ok_or_else(|| ApiError::bad_request("project query parameter is required"))?;
     store
-        .with_connection(|conn| next_item(conn, &repo_path, query.label.as_deref()))
+        .with_connection(|conn| next_item(conn, &project, query.label.as_deref()))
         .map_err(ApiError::internal)?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("no ready item found"))

@@ -36,13 +36,13 @@ impl McpServer {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
-pub(crate) struct BoardNextParams { pub label: Option<String> }
+pub(crate) struct BoardNextParams { pub project: Option<String>, pub label: Option<String> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
-pub(crate) struct BoardListParams { pub status: Option<String>, pub priority: Option<String>, pub label: Option<String>, pub limit: Option<usize> }
+pub(crate) struct BoardListParams { pub project: Option<String>, pub status: Option<String>, pub priority: Option<String>, pub label: Option<String>, pub limit: Option<usize> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardShowParams { pub id: String }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
-pub(crate) struct BoardCreateParams { pub title: String, pub description: Option<String>, pub priority: Option<String>, pub labels: Option<Vec<String>>, pub depends_on: Option<Vec<String>> }
+pub(crate) struct BoardCreateParams { pub project: Option<String>, pub title: String, pub description: Option<String>, pub priority: Option<String>, pub labels: Option<Vec<String>>, pub depends_on: Option<Vec<String>> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardClaimParams { pub id: String, pub assignee: Option<String> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
@@ -54,31 +54,32 @@ pub(crate) struct BoardSubmitParams { pub id: String, pub summary: Option<String
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardNoteParams { pub id: String, pub note: String }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
-pub(crate) struct BoardUpdateParams { pub id: String, pub title: Option<String>, pub description: Option<String>, pub priority: Option<String>, pub labels: Option<Vec<String>> }
+pub(crate) struct BoardUpdateParams { pub id: String, pub project: Option<String>, pub title: Option<String>, pub description: Option<String>, pub priority: Option<String>, pub labels: Option<Vec<String>> }
 
 #[derive(Serialize)]
 struct ItemWithEvents { item: WorkItem, events: Vec<Event> }
 
 #[tool(tool_box)]
 impl McpServer {
-    #[tool(name = "board_next", description = "Get the highest-priority ready item for the current repo")]
+    #[tool(name = "board_next", description = "Get the highest-priority ready item for a project")]
     pub(crate) async fn board_next(&self, #[tool(aggr)] Parameters(params): Parameters<BoardNextParams>) -> Result<String, String> {
-        let repo_path = repo_path().map_err(tool_error)?;
-        self.store.with_connection(|conn| match next_item(conn, &repo_path, params.label.as_deref())? {
+        let project = params.project.unwrap_or_else(detect_project);
+        self.store.with_connection(|conn| match next_item(conn, &project, params.label.as_deref())? {
             Some(item) => pretty_json(&item),
             None => Ok("No ready items".to_owned()),
         }).map_err(tool_error)
     }
 
-    #[tool(name = "board_list", description = "List work items for the current repo with optional filters")]
+    #[tool(name = "board_list", description = "List work items for a project with optional filters")]
     pub(crate) async fn board_list(&self, #[tool(aggr)] Parameters(params): Parameters<BoardListParams>) -> Result<String, String> {
         let filter = ItemFilter {
+            project: Some(params.project.unwrap_or_else(detect_project)),
             status: parse_status(params.status).map_err(tool_error)?,
             priority: parse_priority(params.priority).map_err(tool_error)?,
             label: params.label,
             assignee: None,
             parent_id: None,
-            repo_path: Some(repo_path().map_err(tool_error)?),
+            repo_path: None,
             limit: params.limit,
         };
         self.store.with_connection(|conn| pretty_json(&list_items(conn, &filter)?)).map_err(tool_error)
@@ -93,7 +94,7 @@ impl McpServer {
         }).map_err(tool_error)
     }
 
-    #[tool(name = "board_create", description = "Create a new work item on the current repo board")]
+    #[tool(name = "board_create", description = "Create a new work item for a project")]
     pub(crate) async fn board_create(&self, #[tool(aggr)] Parameters(params): Parameters<BoardCreateParams>) -> Result<String, String> {
         if params.title.trim().is_empty() {
             return Err("title cannot be empty".to_owned());
@@ -101,6 +102,7 @@ impl McpServer {
         let now = Local::now();
         let item = WorkItem {
             id: gen_id(),
+            project: params.project.unwrap_or_else(detect_project),
             repo_path: repo_path().map_err(tool_error)?,
             title: params.title,
             description: params.description.unwrap_or_default(),
@@ -201,11 +203,11 @@ impl McpServer {
     #[tool(name = "board_update", description = "Update editable work item fields")]
     pub(crate) async fn board_update(&self, #[tool(aggr)] Parameters(params): Parameters<BoardUpdateParams>) -> Result<String, String> {
         let priority = parse_priority(params.priority).map_err(tool_error)?;
-        let has_changes = params.title.is_some() || params.description.is_some() || priority.is_some() || params.labels.is_some();
+        let has_changes = params.project.is_some() || params.title.is_some() || params.description.is_some() || priority.is_some() || params.labels.is_some();
         self.store.with_connection(|conn| {
             fetch_item(conn, &params.id)?;
             if has_changes {
-                update_item(conn, &params.id, &ItemUpdate { title: params.title, description: params.description, priority, labels: params.labels, ..ItemUpdate::default() })?;
+                update_item(conn, &params.id, &ItemUpdate { project: params.project, title: params.title, description: params.description, priority, labels: params.labels, ..ItemUpdate::default() })?;
                 insert_event(conn, &params.id, MCP_ACTOR, "updated", None, None)?;
             }
             pretty_json(&fetch_item(conn, &params.id)?)
@@ -224,6 +226,12 @@ impl ServerHandler for McpServer {
     }
 }
 
+fn detect_project() -> String {
+    std::env::current_dir()
+        .ok()
+        .and_then(|path| path.file_name().and_then(|name| name.to_str()).map(str::to_owned))
+        .unwrap_or_else(|| "default".to_owned())
+}
 fn repo_path() -> Result<String> { Ok(std::env::current_dir()?.display().to_string()) }
 fn tool_error(error: anyhow::Error) -> String { error.to_string() }
 fn pretty_json<T: Serialize>(value: &T) -> Result<String> { Ok(serde_json::to_string_pretty(value)?) }

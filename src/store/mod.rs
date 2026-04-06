@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 
 #[allow(unused_imports)]
@@ -62,7 +62,7 @@ impl Store {
 }
 
 fn default_path() -> Result<PathBuf> {
-    Ok(std::env::current_dir()?.join(".ai-board").join("db.sqlite3"))
+    Ok(home_dir()?.join(".ai-board").join("db.sqlite3"))
 }
 
 fn configure_connection(conn: &Connection) -> Result<()> {
@@ -76,6 +76,12 @@ fn lock_connection(conn: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+fn home_dir() -> Result<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("HOME is not set"))
 }
 
 #[cfg(test)]

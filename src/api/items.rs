@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
-    api::{ApiError, AppState, agent_actor, default_repo_path, missing_item},
+    api::{ApiError, AppState, agent_actor, default_project, default_repo_path, missing_item},
     store::{ItemFilter, ItemUpdate, delete_item, gen_id, get_item, insert_event, insert_item, list_events, list_items, reorder_items, update_item, update_item_status},
     types::{Event, Priority, Status, WorkItem},
 };
@@ -29,6 +29,7 @@ pub fn routes() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct ItemQuery {
+    project: Option<String>,
     status: Option<Status>,
     priority: Option<Priority>,
     label: Option<String>,
@@ -39,6 +40,7 @@ struct ItemQuery {
 
 #[derive(Deserialize)]
 struct CreateItemBody {
+    project: Option<String>,
     repo_path: Option<String>,
     title: String,
     description: Option<String>,
@@ -61,6 +63,7 @@ struct CreateItemBody {
 
 #[derive(Deserialize, Default)]
 struct UpdateItemBody {
+    project: Option<Option<String>>,
     repo_path: Option<String>,
     title: Option<String>,
     description: Option<String>,
@@ -102,14 +105,14 @@ async fn list(
     State(store): State<AppState>,
     Query(query): Query<ItemQuery>,
 ) -> Result<Json<Vec<WorkItem>>, ApiError> {
-    let repo_path = default_repo_path(query.repo_path)?;
     let filter = ItemFilter {
+        project: default_project(query.project),
         status: query.status,
         priority: query.priority,
         label: query.label,
         assignee: query.assignee,
         parent_id: None,
-        repo_path: Some(repo_path),
+        repo_path: default_repo_path(query.repo_path),
         limit: query.limit,
     };
     let items = store.with_connection(|conn| list_items(conn, &filter)).map_err(ApiError::internal)?;
@@ -140,7 +143,8 @@ async fn create(
     let now = Local::now();
     let item = WorkItem {
         id: gen_id(),
-        repo_path: default_repo_path(body.repo_path.or(query.repo_path))?,
+        project: default_project(body.project.or(query.project)).unwrap_or_default(),
+        repo_path: default_repo_path(body.repo_path.or(query.repo_path)).unwrap_or_default(),
         title: body.title,
         description: body.description.unwrap_or_default(),
         status: body.status.unwrap_or(Status::Backlog),
@@ -178,6 +182,7 @@ async fn update(
     Json(body): Json<UpdateItemBody>,
 ) -> Result<Json<WorkItem>, ApiError> {
     let update = ItemUpdate {
+        project: body.project.map(Option::unwrap_or_default),
         repo_path: body.repo_path,
         title: body.title,
         description: body.description,
