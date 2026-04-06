@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ai-board</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>ai-board</h1>
+    <nav class="view-switch" aria-label="View mode">
+      <button type="button" id="btn-board" class="is-active">Board</button>
+      <button type="button" id="btn-list">List</button>
+    </nav>
+    <button type="button" id="btn-create" class="btn-primary">Create</button>
+  </header>
+  <div class="filter-bar" id="filter-bar" aria-label="Filters"></div>
+  <main class="main">
+    <section id="view-board" class="board-wrap" aria-label="Kanban board"></section>
+    <section id="view-list" class="list-wrap is-hidden" aria-label="List view"></section>
+  </main>
+  <div id="panel-root"></div>
+  <div id="modal-root"></div>
+  <script src="app.js"></script>
+</body>
+</html>
