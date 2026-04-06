@@ -115,5 +115,10 @@ fn migrate_items_project(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    // Backfill empty project from repo_path basename
+    conn.execute(
+        "UPDATE items SET project = REPLACE(SUBSTR(repo_path, LENGTH(RTRIM(repo_path, REPLACE(repo_path, '/', ''))) + 1), '/', '') WHERE project = '' AND repo_path != ''",
+        [],
+    )?;
     Ok(())
 }
