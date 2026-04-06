@@ -17,6 +17,7 @@ use serde::Serialize;
 use tower_http::cors::{Any, AllowOrigin, CorsLayer};
 
 use crate::store::Store;
+use crate::web::static_handler;
 
 pub type AppState = Arc<Store>;
 
@@ -25,6 +26,7 @@ pub fn router(store: Arc<Store>) -> Router {
         .merge(items::routes())
         .merge(agent::routes())
         .route("/api/stream", get(sse::stream))
+        .fallback(static_handler)
         .layer(cors_layer())
         .with_state(store)
 }

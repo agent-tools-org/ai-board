@@ -7,6 +7,7 @@ mod mcp;
 mod render;
 mod store;
 mod types;
+mod web;
 
 use std::{env, fs};
 
