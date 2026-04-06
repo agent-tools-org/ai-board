@@ -1,17 +1,10 @@
+import { artifactsSectionHtml, bindArtifactsPanel, gateWarningHtml } from "./artifacts.js";
 import { renderList } from "./list.js";
 import { connectSse } from "./sse.js";
 import { defaultProject, esc, multiProj, rel } from "./utils.js";
 
 (() => {
-	const COLS = [
-		"backlog",
-		"ready",
-		"active",
-		"review",
-		"done",
-		"blocked",
-		"rejected",
-	];
+	const COLS = ["backlog", "ready", "active", "review", "done", "blocked", "rejected"];
 	const PRIOS = ["critical", "high", "medium", "low"];
 	const PRN = { critical: 0, high: 1, medium: 2, low: 3 };
 	const STR = ["id", "project", "title", "status", "assignee"];
@@ -69,9 +62,7 @@ import { defaultProject, esc, multiProj, rel } from "./utils.js";
 		}
 	}
 	function renderFilters() {
-		const labels = [
-			...new Set([...items.values()].flatMap((i) => i.labels)),
-		].sort();
+		const labels = [...new Set([...items.values()].flatMap((i) => i.labels))].sort();
 		const projects = [
 			...new Set([...items.values()].map((i) => i.project).filter(Boolean)),
 		].sort();
@@ -151,7 +142,7 @@ import { defaultProject, esc, multiProj, rel } from "./utils.js";
 						]);
 						await refreshItem(id);
 					} catch (err) {
-						alert(err.message);
+						alert(err.message || String(err));
 					}
 				};
 			});
@@ -162,6 +153,15 @@ import { defaultProject, esc, multiProj, rel } from "./utils.js";
 	async function openDetail(id) {
 		const data = await api("GET", `/api/items/${encodeURIComponent(id)}`);
 		const it = data.item;
+		let arts = [];
+		let artErr = "";
+		try {
+			arts = await api("GET", `/api/items/${encodeURIComponent(id)}/artifacts`);
+		} catch (e) {
+			artErr = e.message || String(e);
+		}
+		const gw = artErr ? "" : gateWarningHtml(it.status, arts);
+		const artSec = artifactsSectionHtml(arts, artErr);
 		const evs = data.events || [];
 		const review = it.status === "review";
 		const pr = PRIOS.map(
@@ -170,33 +170,34 @@ import { defaultProject, esc, multiProj, rel } from "./utils.js";
 		const st = COLS.map(
 			(s) => `<option ${s === it.status ? "selected" : ""}>${s}</option>`,
 		).join("");
-		const hist = evs
-			.slice()
-			.reverse()
-			.map(
-				(ev) =>
-					`<div class="event"><strong>${esc(ev.action)}</strong> · ${esc(ev.actor)} · ${rel(ev.created_at)}${ev.detail ? ` — ${esc(ev.detail)}` : ""}</div>`,
-			)
-			.join("");
+		const hist = evs.slice().reverse().map(
+			(ev) =>
+				`<div class="event"><strong>${esc(ev.action)}</strong> · ${esc(ev.actor)} · ${rel(ev.created_at)}${ev.detail ? ` — ${esc(ev.detail)}` : ""}</div>`,
+		).join("");
 		const rev = review
 			? `<button type="button" class="btn-primary" id="f-ap">Approve</button><button type="button" class="btn-ghost" id="f-rj">Reject</button>`
 			: "";
 		$("#panel-root").innerHTML =
-			`<div class="overlay-backdrop" id="db"></div><aside class="side-panel" id="detail-panel" data-id="${it.id}"><div class="panel-head"><div><strong>${esc(it.id)}</strong></div><button type="button" id="px" aria-label="Close">×</button></div><div class="panel-body"><div class="panel-row"><label>Title</label><input type="text" id="f-title" value="${esc(it.title)}" /></div><div class="panel-row"><label>Description</label><textarea id="f-desc">${esc(it.description || "")}</textarea></div><div class="panel-row"><label>Project</label><input type="text" id="f-proj" value="${esc(it.project || "")}" /></div><div class="panel-row"><label>Priority</label><select id="f-pri">${pr}</select></div><div class="panel-row"><label>Status</label><select id="f-st">${st}</select></div><div class="panel-actions"><button type="button" class="btn-primary" id="f-save">Save</button>${rev}<button type="button" class="btn-danger" id="f-del">Delete</button></div><div class="events"><h3>History</h3>${hist}</div></div></aside>`;
+			`<div class="overlay-backdrop" id="db"></div><aside class="side-panel" id="detail-panel" data-id="${it.id}"><div class="panel-head"><div><strong>${esc(it.id)}</strong></div><button type="button" id="px" aria-label="Close">×</button></div><div class="panel-body"><div class="panel-row"><label>Title</label><input type="text" id="f-title" value="${esc(it.title)}" /></div><div class="panel-row"><label>Description</label><textarea id="f-desc">${esc(it.description || "")}</textarea></div><div class="panel-row"><label>Project</label><input type="text" id="f-proj" value="${esc(it.project || "")}" /></div><div class="panel-row"><label>Priority</label><select id="f-pri">${pr}</select></div><div class="panel-row"><label>Status</label><select id="f-st">${st}</select></div><div class="panel-actions"><button type="button" class="btn-primary" id="f-save">Save</button>${rev}<button type="button" class="btn-danger" id="f-del">Delete</button></div><div class="events"><h3>History</h3>${hist}</div>${gw}${artSec}</div></aside>`;
 		const close = () => closeDetail();
 		$("#db").onclick = close;
 		$("#px").onclick = close;
 		$("#f-save").onclick = async () => {
-			await api("PATCH", `/api/items/${encodeURIComponent(id)}`, {
-				title: $("#f-title").value,
-				description: $("#f-desc").value,
-				project: $("#f-proj").value.trim() || undefined,
-				priority: $("#f-pri").value,
-				status: $("#f-st").value,
-			});
-			await refreshItem(id);
-			close();
+			try {
+				await api("PATCH", `/api/items/${encodeURIComponent(id)}`, {
+					title: $("#f-title").value,
+					description: $("#f-desc").value,
+					project: $("#f-proj").value.trim() || undefined,
+					priority: $("#f-pri").value,
+					status: $("#f-st").value,
+				});
+				await refreshItem(id);
+				close();
+			} catch (e) {
+				alert(e.message || String(e));
+			}
 		};
+		bindArtifactsPanel($, id, api, () => openDetail(id));
 		$("#f-del").onclick = async () => {
 			if (!confirm("Delete this item?")) return;
 			await api("DELETE", `/api/items/${encodeURIComponent(id)}`);
