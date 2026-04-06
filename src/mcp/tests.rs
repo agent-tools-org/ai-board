@@ -27,16 +27,18 @@ async fn lists_shows_and_picks_ready_items_for_current_repo() {
     let store = Arc::new(Store::open(&path).expect("open store"));
     let server = McpServer::new(store.clone());
     let created: WorkItem = serde_json::from_str(&server.board_create(Parameters(BoardCreateParams {
-        title: "Triage queue".to_owned(), description: Some("Inspect queue order".to_owned()),
-        priority: Some("high".to_owned()), labels: Some(vec!["ops".to_owned()]), depends_on: None,
+        project: None, title: "Triage queue".to_owned(),
+        description: Some("Inspect queue order".to_owned()), priority: Some("high".to_owned()),
+        labels: Some(vec!["ops".to_owned()]), depends_on: None,
     })).await.expect("create")).expect("decode created item");
     store.with_connection(|conn| update_item_status(conn, &created.id, Status::Ready)).expect("mark ready");
 
     let listed: Vec<WorkItem> = serde_json::from_str(&server.board_list(Parameters(BoardListParams {
-        status: Some("ready".to_owned()), priority: Some("high".to_owned()), label: Some("ops".to_owned()), limit: Some(10),
+        project: None, status: Some("ready".to_owned()), priority: Some("high".to_owned()),
+        label: Some("ops".to_owned()), limit: Some(10),
     })).await.expect("list")).expect("decode items");
     let next: WorkItem = serde_json::from_str(&server.board_next(Parameters(BoardNextParams {
-        label: Some("ops".to_owned()),
+        project: None, label: Some("ops".to_owned()),
     })).await.expect("next")).expect("decode next item");
     let shown: ItemWithEvents = serde_json::from_str(&server.board_show(Parameters(BoardShowParams {
         id: created.id.clone(),
@@ -58,12 +60,14 @@ async fn claims_updates_notes_and_completes_items() {
     let store = Arc::new(Store::open(&path).expect("open store"));
     let server = McpServer::new(store.clone());
     let created: WorkItem = serde_json::from_str(&server.board_create(Parameters(BoardCreateParams {
-        title: "Ship MCP".to_owned(), description: None, priority: None, labels: None, depends_on: None,
+        project: None, title: "Ship MCP".to_owned(), description: None, priority: None,
+        labels: None, depends_on: None,
     })).await.expect("create")).expect("decode created item");
 
     let updated: WorkItem = serde_json::from_str(&server.board_update(Parameters(BoardUpdateParams {
-        id: created.id.clone(), title: Some("Ship MCP server".to_owned()), description: None,
-        priority: Some("critical".to_owned()), labels: Some(vec!["mcp".to_owned()]),
+        id: created.id.clone(), project: None, title: Some("Ship MCP server".to_owned()),
+        description: None, priority: Some("critical".to_owned()),
+        labels: Some(vec!["mcp".to_owned()]),
     })).await.expect("update")).expect("decode updated item");
     let claimed: WorkItem = serde_json::from_str(&server.board_claim(Parameters(BoardClaimParams {
         id: created.id.clone(), assignee: Some("alice".to_owned()),
@@ -98,7 +102,8 @@ async fn submits_and_blocks_items_with_confirmation() {
     let store = Arc::new(Store::open(&path).expect("open store"));
     let server = McpServer::new(store.clone());
     let review_item: WorkItem = serde_json::from_str(&server.board_create(Parameters(BoardCreateParams {
-        title: "Needs review".to_owned(), description: None, priority: None, labels: None, depends_on: None,
+        project: None, title: "Needs review".to_owned(), description: None, priority: None,
+        labels: None, depends_on: None,
     })).await.expect("create review item")).expect("decode review item");
     store.with_connection(|conn| update_item(conn, &review_item.id, &ItemUpdate {
         requires_approval: Some(true), ..ItemUpdate::default()
@@ -112,7 +117,8 @@ async fn submits_and_blocks_items_with_confirmation() {
     })).await.expect("show review")).expect("decode review payload");
 
     let blocked_item: WorkItem = serde_json::from_str(&server.board_create(Parameters(BoardCreateParams {
-        title: "Blocked task".to_owned(), description: None, priority: None, labels: None, depends_on: None,
+        project: None, title: "Blocked task".to_owned(), description: None, priority: None,
+        labels: None, depends_on: None,
     })).await.expect("create blocked item")).expect("decode blocked item");
     server.board_block(Parameters(BoardBlockParams {
         id: blocked_item.id.clone(), reason: "Waiting on schema".to_owned(),

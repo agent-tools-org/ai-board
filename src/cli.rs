@@ -28,6 +28,8 @@ pub enum Command {
 pub enum ItemCommand {
     Create {
         title: String,
+        #[arg(long, short)]
+        project: Option<String>,
         #[arg(long)]
         description: Option<String>,
         #[arg(long, default_value = "medium")]
@@ -52,6 +54,8 @@ pub enum ItemCommand {
         auto_dispatch: bool,
     },
     List {
+        #[arg(long, short)]
+        project: Option<String>,
         #[arg(long)]
         status: Option<Status>,
         #[arg(long)]
@@ -90,6 +94,8 @@ pub enum ItemCommand {
 
 #[derive(Debug, clap::Args)]
 pub struct NextArgs {
+    #[arg(long, short)]
+    pub project: Option<String>,
     #[arg(long)]
     pub label: Option<String>,
 }

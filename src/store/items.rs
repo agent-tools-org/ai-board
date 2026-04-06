@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter, typ
 
 use crate::types::{Priority, Status, WorkItem};
 
-const ITEM_SELECT: &str = "SELECT id, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at FROM items";
+const ITEM_SELECT: &str = "SELECT id, project, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at FROM items";
 const STATUS_ORDER_SQL: &str =
     "CASE status WHEN 'backlog' THEN 0 WHEN 'ready' THEN 1 WHEN 'active' THEN 2 WHEN 'review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'rejected' THEN 6 ELSE 7 END";
 const PRIORITY_ORDER_SQL: &str =
@@ -21,12 +21,14 @@ pub struct ItemFilter {
     pub label: Option<String>,
     pub assignee: Option<String>,
     pub parent_id: Option<String>,
+    pub project: Option<String>,
     pub repo_path: Option<String>,
     pub limit: Option<usize>,
 }
 
 #[derive(Default)]
 pub struct ItemUpdate {
+    pub project: Option<String>,
     pub repo_path: Option<String>,
     pub title: Option<String>,
     pub description: Option<String>,
@@ -47,6 +49,7 @@ pub struct ItemUpdate {
 
 struct ItemRow {
     id: String,
+    project: String,
     repo_path: String,
     title: String,
     description: String,
@@ -71,13 +74,13 @@ struct ItemRow {
 pub fn insert_item(conn: &Connection, item: &WorkItem) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO items (id, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO items (id, project, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
-            item.id, item.repo_path, item.title, item.description, enum_text(&item.status)?,
-            enum_text(&item.priority)?, item.position, item.parent_id, item.assignee,
-            item.created_by, item.requires_approval as i64, item.auto_dispatch as i64,
-            item.estimate, item.aid_agent, item.aid_verify, item.due_date,
+            item.id, item.project, item.repo_path, item.title, item.description,
+            enum_text(&item.status)?, enum_text(&item.priority)?, item.position, item.parent_id,
+            item.assignee, item.created_by, item.requires_approval as i64,
+            item.auto_dispatch as i64, item.estimate, item.aid_agent, item.aid_verify, item.due_date,
             item.created_at.to_rfc3339(), item.updated_at.to_rfc3339(),
             item.started_at.as_ref().map(DateTime::to_rfc3339),
             item.completed_at.as_ref().map(DateTime::to_rfc3339),
@@ -130,13 +133,10 @@ pub fn delete_item(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn next_item(conn: &Connection, repo_path: &str, label: Option<&str>) -> Result<Option<WorkItem>> {
-    let mut sql = format!("{ITEM_SELECT} WHERE repo_path = ? AND status = 'ready' AND NOT EXISTS (SELECT 1 FROM item_dependencies d JOIN items dep ON dep.id = d.depends_on WHERE d.item_id = items.id AND dep.status != 'done')");
-    let mut params = vec![Value::from(repo_path.to_owned())];
-    if let Some(label) = label {
-        sql.push_str(" AND EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = items.id AND l.label = ?)");
-        params.push(Value::from(label.to_owned()));
-    }
+pub fn next_item(conn: &Connection, project: &str, label: Option<&str>) -> Result<Option<WorkItem>> {
+    let mut sql = format!("{ITEM_SELECT} WHERE project = ? AND status = 'ready' AND NOT EXISTS (SELECT 1 FROM item_dependencies d JOIN items dep ON dep.id = d.depends_on WHERE d.item_id = items.id AND dep.status != 'done')");
+    let mut params = vec![Value::from(project.to_owned())];
+    if let Some(label) = label { sql.push_str(" AND EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = items.id AND l.label = ?)"); params.push(Value::from(label.to_owned())); }
     sql.push_str(&format!(" ORDER BY {PRIORITY_ORDER_SQL}, position ASC LIMIT 1"));
     let row = conn.query_row(&sql, params_from_iter(params.iter()), read_item_row).optional()?;
     row.map(|row| build_item(conn, row)).transpose()
@@ -170,6 +170,7 @@ fn build_list_query(filter: &ItemFilter) -> (String, Vec<Value>) {
     if let Some(label) = &filter.label { clauses.push("EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = items.id AND l.label = ?)"); params.push(Value::from(label.clone())); }
     if let Some(assignee) = &filter.assignee { clauses.push("assignee = ?"); params.push(Value::from(assignee.clone())); }
     if let Some(parent_id) = &filter.parent_id { clauses.push("parent_id = ?"); params.push(Value::from(parent_id.clone())); }
+    if let Some(project) = &filter.project { clauses.push("project = ?"); params.push(Value::from(project.clone())); }
     if let Some(repo_path) = &filter.repo_path { clauses.push("repo_path = ?"); params.push(Value::from(repo_path.clone())); }
     if !clauses.is_empty() { sql.push_str(" WHERE "); sql.push_str(&clauses.join(" AND ")); }
     sql.push_str(&format!(" ORDER BY {STATUS_ORDER_SQL}, position ASC"));
@@ -180,6 +181,7 @@ fn build_list_query(filter: &ItemFilter) -> (String, Vec<Value>) {
 fn apply_item_update(conn: &Connection, id: &str, update: &ItemUpdate) -> Result<bool> {
     let mut sets = Vec::new();
     let mut params = Vec::new();
+    if let Some(value) = &update.project { sets.push("project = ?"); params.push(Value::from(value.clone())); }
     if let Some(value) = &update.repo_path { sets.push("repo_path = ?"); params.push(Value::from(value.clone())); }
     if let Some(value) = &update.title { sets.push("title = ?"); params.push(Value::from(value.clone())); }
     if let Some(value) = &update.description { sets.push("description = ?"); params.push(Value::from(value.clone())); }
@@ -210,6 +212,7 @@ fn apply_item_update(conn: &Connection, id: &str, update: &ItemUpdate) -> Result
 fn build_item(conn: &Connection, row: ItemRow) -> Result<WorkItem> {
     Ok(WorkItem {
         id: row.id.clone(),
+        project: row.project,
         repo_path: row.repo_path,
         title: row.title,
         description: row.description,
@@ -237,13 +240,14 @@ fn build_item(conn: &Connection, row: ItemRow) -> Result<WorkItem> {
 
 fn read_item_row(row: &Row<'_>) -> rusqlite::Result<ItemRow> {
     Ok(ItemRow {
-        id: row.get(0)?, repo_path: row.get(1)?, title: row.get(2)?, description: row.get(3)?,
-        status: row.get(4)?, priority: row.get(5)?, position: row.get(6)?, parent_id: row.get(7)?,
-        assignee: row.get(8)?, created_by: row.get(9)?,
-        requires_approval: row.get::<_, i64>(10)? != 0, auto_dispatch: row.get::<_, i64>(11)? != 0,
-        estimate: row.get(12)?, aid_agent: row.get(13)?, aid_verify: row.get(14)?,
-        due_date: row.get(15)?, created_at: row.get(16)?, updated_at: row.get(17)?,
-        started_at: row.get(18)?, completed_at: row.get(19)?,
+        id: row.get(0)?, project: row.get(1)?, repo_path: row.get(2)?, title: row.get(3)?,
+        description: row.get(4)?, status: row.get(5)?, priority: row.get(6)?,
+        position: row.get(7)?, parent_id: row.get(8)?, assignee: row.get(9)?,
+        created_by: row.get(10)?, requires_approval: row.get::<_, i64>(11)? != 0,
+        auto_dispatch: row.get::<_, i64>(12)? != 0, estimate: row.get(13)?,
+        aid_agent: row.get(14)?, aid_verify: row.get(15)?, due_date: row.get(16)?,
+        created_at: row.get(17)?, updated_at: row.get(18)?, started_at: row.get(19)?,
+        completed_at: row.get(20)?,
     })
 }
 
@@ -290,11 +294,7 @@ fn parse_time(value: &str) -> Result<DateTime<Local>> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Local))
 }
 
-fn parse_optional_time(value: Option<String>) -> Result<Option<DateTime<Local>>> {
-    value.as_deref().map(parse_time).transpose()
-}
+fn parse_optional_time(value: Option<String>) -> Result<Option<DateTime<Local>>> { value.as_deref().map(parse_time).transpose() }
 
-fn optional_text(value: Option<String>) -> Value {
-    value.map(Value::from).unwrap_or(Value::Null)
-}
+fn optional_text(value: Option<String>) -> Value { value.map(Value::from).unwrap_or(Value::Null) }
 fn now_text() -> String { Local::now().to_rfc3339() }

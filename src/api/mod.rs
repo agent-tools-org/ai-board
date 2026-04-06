@@ -1,5 +1,5 @@
 // Axum API router setup for dashboard, agent, and SSE endpoints.
-// Exports: router(), ApiError, AppState, repo_path/actor helpers.
+// Exports: router(), ApiError, AppState, and request helper functions.
 
 pub mod agent;
 pub mod items;
@@ -60,14 +60,12 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub fn default_repo_path(repo_path: Option<String>) -> Result<String, ApiError> {
-    repo_path
-        .map(Ok)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map_err(|error| ApiError::internal(error.into()))
-                .map(|path| path.display().to_string())
-        })
+pub fn default_project(project: Option<String>) -> Option<String> {
+    project.filter(|value| !value.is_empty())
+}
+
+pub fn default_repo_path(repo_path: Option<String>) -> Option<String> {
+    repo_path.filter(|value| !value.is_empty())
 }
 
 pub fn agent_actor(name: &str) -> Result<String, ApiError> {
