@@ -16,10 +16,11 @@ use serde_json::json;
 
 use crate::{
     store::{
-        ItemFilter, ItemUpdate, Store, gen_id, get_item, insert_event, insert_item, list_events,
-        list_items, next_item, update_item, update_item_status,
+        ItemFilter, ItemUpdate, Store, gen_artifact_id, gen_id, get_item, insert_artifact,
+        insert_event, insert_item, list_artifacts, list_events, list_items, next_item,
+        update_item, update_item_status,
     },
-    types::{Event, Priority, Status, WorkItem},
+    types::{Artifact, ArtifactType, Event, Priority, Status, WorkItem},
 };
 
 const MCP_ACTOR: &str = "agent:mcp";
@@ -42,7 +43,11 @@ pub(crate) struct BoardListParams { pub project: Option<String>, pub status: Opt
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardShowParams { pub id: String }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
+pub(crate) struct BoardArtifactsParams { pub item_id: String }
+#[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardCreateParams { pub project: Option<String>, pub title: String, pub description: Option<String>, pub priority: Option<String>, pub labels: Option<Vec<String>>, pub depends_on: Option<Vec<String>> }
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct BoardAttachParams { pub item_id: String, pub artifact_type: ArtifactType, pub title: String, pub path: Option<String>, pub content: Option<String>, pub status: Option<String> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
 pub(crate) struct BoardClaimParams { pub id: String, pub assignee: Option<String> }
 #[derive(Debug, Deserialize, schemars::JsonSchema, Default)]
@@ -94,6 +99,11 @@ impl McpServer {
         }).map_err(tool_error)
     }
 
+    #[tool(name = "board_artifacts", description = "List artifacts attached to a work item")]
+    pub(crate) async fn board_artifacts(&self, #[tool(aggr)] Parameters(params): Parameters<BoardArtifactsParams>) -> Result<String, String> {
+        self.store.with_connection(|conn| { fetch_item(conn, &params.item_id)?; pretty_json(&list_artifacts(conn, &params.item_id)?) }).map_err(tool_error)
+    }
+
     #[tool(name = "board_create", description = "Create a new work item for a project")]
     pub(crate) async fn board_create(&self, #[tool(aggr)] Parameters(params): Parameters<BoardCreateParams>) -> Result<String, String> {
         if params.title.trim().is_empty() {
@@ -133,6 +143,16 @@ impl McpServer {
         }).map_err(tool_error)
     }
 
+    #[tool(name = "board_attach", description = "Attach an artifact to a work item")]
+    pub(crate) async fn board_attach(&self, #[tool(aggr)] Parameters(params): Parameters<BoardAttachParams>) -> Result<String, String> {
+        if params.title.trim().is_empty() {
+            return Err("artifact title cannot be empty".to_owned());
+        }
+        let now = Local::now();
+        let artifact = Artifact { id: gen_artifact_id(), item_id: params.item_id.clone(), artifact_type: params.artifact_type, title: params.title, path: params.path, content: params.content.unwrap_or_default(), status: params.status.unwrap_or_else(|| "final".to_owned()), created_by: MCP_ACTOR.to_owned(), created_at: now, updated_at: now };
+        self.store.with_connection(|conn| { fetch_item(conn, &params.item_id)?; insert_artifact(conn, &artifact)?; pretty_json(&artifact) }).map_err(tool_error)
+    }
+
     #[tool(name = "board_claim", description = "Claim a work item and mark it active")]
     pub(crate) async fn board_claim(&self, #[tool(aggr)] Parameters(params): Parameters<BoardClaimParams>) -> Result<String, String> {
         let assignee = normalize_assignee(params.assignee).map_err(tool_error)?;
@@ -141,7 +161,7 @@ impl McpServer {
             if assignee.is_some() {
                 update_item(conn, &params.id, &ItemUpdate { assignee: assignee.clone().map(Some), ..ItemUpdate::default() })?;
             }
-            update_item_status(conn, &params.id, Status::Active)?;
+            update_item_status(conn, &params.id, Status::Active, false)?;
             insert_event(conn, &params.id, assignee.as_deref().unwrap_or(&current_actor(&item)), "claimed", None, None)?;
             pretty_json(&fetch_item(conn, &params.id)?)
         }).map_err(tool_error)
@@ -158,7 +178,7 @@ impl McpServer {
                 push_aid_task(&mut item, task_id);
                 update_item(conn, &params.id, &ItemUpdate { aid_task_ids: Some(item.aid_task_ids.clone()), ..ItemUpdate::default() })?;
             }
-            update_item_status(conn, &params.id, if item.requires_approval { Status::Review } else { Status::Done })?;
+            update_item_status(conn, &params.id, if item.requires_approval { Status::Review } else { Status::Done }, false)?;
             let metadata = json!({ "summary": params.summary, "aid_task_id": params.aid_task_id });
             insert_event(conn, &params.id, &current_actor(&item), "completed", Some(&params.summary), Some(&metadata))?;
             pretty_json(&fetch_item(conn, &params.id)?)
@@ -172,7 +192,7 @@ impl McpServer {
         }
         self.store.with_connection(|conn| {
             let item = fetch_item(conn, &params.id)?;
-            update_item_status(conn, &params.id, Status::Blocked)?;
+            update_item_status(conn, &params.id, Status::Blocked, false)?;
             insert_event(conn, &params.id, &current_actor(&item), "blocked", Some(&params.reason), None)?;
             ack(&params.id, "blocked")
         }).map_err(tool_error)
@@ -182,7 +202,7 @@ impl McpServer {
     pub(crate) async fn board_submit(&self, #[tool(aggr)] Parameters(params): Parameters<BoardSubmitParams>) -> Result<String, String> {
         self.store.with_connection(|conn| {
             let item = fetch_item(conn, &params.id)?;
-            update_item_status(conn, &params.id, Status::Review)?;
+            update_item_status(conn, &params.id, Status::Review, false)?;
             insert_event(conn, &params.id, &current_actor(&item), "submitted", params.summary.as_deref().filter(|s| !s.trim().is_empty()), None)?;
             ack(&params.id, "submitted")
         }).map_err(tool_error)

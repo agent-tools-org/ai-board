@@ -16,9 +16,9 @@ use chrono::Local;
 use clap::Parser;
 
 use crate::cli::{Cli, Command, ItemCommand, NextArgs, ServeArgs};
-use crate::render::{print_item, print_list};
+use crate::render::{print_artifacts, print_item, print_list};
 use crate::store::{ItemFilter, ItemUpdate, Store};
-use crate::types::{Priority, Status, WorkItem};
+use crate::types::{Artifact, ArtifactType, Priority, Status, WorkItem};
 
 fn main() -> Result<()> {
     match Cli::parse().command {
@@ -37,6 +37,9 @@ fn handle_item(command: ItemCommand) -> Result<()> {
         ItemCommand::List { project, status, priority, label, assignee, limit } =>
             handle_list(project, status, priority, label, assignee, limit),
         ItemCommand::Show { id } => handle_show(&id),
+        ItemCommand::Attach { item_id, artifact_type, title, path, content, status } =>
+            handle_attach(&item_id, artifact_type, title, path, content, status),
+        ItemCommand::Artifacts { item_id } => handle_artifacts(&item_id),
         ItemCommand::Update { id, title, description, priority, status, label, assignee, position } =>
             handle_update(&id, title, description, priority, status, label, assignee, position),
         ItemCommand::Delete { id } => handle_delete(&id),
@@ -114,6 +117,41 @@ fn handle_show(id: &str) -> Result<()> {
     Ok(())
 }
 
+fn handle_attach(
+    item_id: &str,
+    artifact_type: ArtifactType,
+    title: String,
+    path: Option<String>,
+    content: Option<String>,
+    status: String,
+) -> Result<()> {
+    let store = open_store()?;
+    let _ = load_item(&store.connection(), item_id)?;
+    let now = Local::now();
+    let artifact = Artifact {
+        id: crate::store::gen_artifact_id(),
+        item_id: item_id.to_owned(),
+        artifact_type,
+        title,
+        path,
+        content: content.unwrap_or_default(),
+        status,
+        created_by: "human:cli".to_owned(),
+        created_at: now,
+        updated_at: now,
+    };
+    crate::store::insert_artifact(&store.connection(), &artifact)?;
+    println!("Attached {}", artifact.id);
+    Ok(())
+}
+
+fn handle_artifacts(item_id: &str) -> Result<()> {
+    let store = open_store()?;
+    let _ = load_item(&store.connection(), item_id)?;
+    print_artifacts(&crate::store::list_artifacts(&store.connection(), item_id)?);
+    Ok(())
+}
+
 fn handle_update(
     id: &str,
     title: Option<String>,
@@ -149,7 +187,7 @@ fn handle_update(
             due_date: None,
         },
     )?;
-    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status)?; }
+    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status, false)?; }
     crate::store::insert_event(&store.connection(), id, "human:cli", "updated", Some("Updated via CLI"), None)?;
     println!("Updated {id}");
     Ok(())

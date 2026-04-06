@@ -69,6 +69,19 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS artifacts (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            artifact_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            path TEXT,
+            content TEXT DEFAULT '',
+            status TEXT DEFAULT 'draft',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+        );
         CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
         CREATE INDEX IF NOT EXISTS idx_items_priority ON items(priority);
         CREATE INDEX IF NOT EXISTS idx_items_parent_id ON items(parent_id);
@@ -76,6 +89,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_events_item_id ON events(item_id);
         CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
         CREATE INDEX IF NOT EXISTS idx_item_labels_label ON item_labels(label);
+        CREATE INDEX IF NOT EXISTS idx_artifacts_item ON artifacts(item_id);
         ",
     )?;
     migrate_items_project(conn)?;

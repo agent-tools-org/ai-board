@@ -89,7 +89,7 @@ async fn claim(
                     ..ItemUpdate::default()
                 },
             )?;
-            update_item_status(conn, &id, Status::Active)?;
+            update_item_status(conn, &id, Status::Active, false)?;
             insert_event(conn, &id, &actor, "claimed", None, None)?;
             get_item(conn, &id)?.ok_or_else(|| anyhow::anyhow!("missing"))
         })
@@ -121,7 +121,7 @@ async fn complete(
                 )?;
             }
             let status = if item.requires_approval { Status::Review } else { Status::Done };
-            update_item_status(conn, &id, status)?;
+            update_item_status(conn, &id, status, false)?;
             let metadata = json!({
                 "summary": body.summary,
                 "aid_task_id": body.aid_task_id,
@@ -185,7 +185,7 @@ async fn agent_transition(
         .with_connection(|conn| {
             let item = fetch_item(conn, &id)?;
             let actor = current_actor(&item);
-            update_item_status(conn, &id, status)?;
+            update_item_status(conn, &id, status, false)?;
             let maybe_detail = (!detail.trim().is_empty()).then_some(detail.as_str());
             insert_event(conn, &id, &actor, action, maybe_detail, metadata.as_ref())?;
             get_item(conn, &id)?.ok_or_else(|| anyhow::anyhow!("missing"))

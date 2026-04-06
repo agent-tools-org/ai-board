@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Duration, Local};
 
-use crate::types::{Event, Priority, Status, WorkItem};
+use crate::types::{Artifact, ArtifactType, Event, Priority, Status, WorkItem};
 
 const RESET: &str = "\x1b[0m";
 const RED: &str = "\x1b[31m";
@@ -66,6 +66,26 @@ pub fn print_item(item: &WorkItem, events: &[Event]) {
     }
 }
 
+pub fn print_artifacts(artifacts: &[Artifact]) {
+    println!(
+        "{} {} {} {} UPDATED",
+        pad("ID", 8),
+        pad("TYPE", 14),
+        pad("STATUS", 8),
+        pad("TITLE", 28),
+    );
+    for artifact in artifacts {
+        println!(
+            "{} {} {} {} {}",
+            pad(&artifact.id, 8),
+            pad(artifact_type_text(&artifact.artifact_type), 14),
+            pad(&artifact.status, 8),
+            pad(&artifact.title, 28),
+            relative_time(artifact.updated_at),
+        );
+    }
+}
+
 fn joined_or_dash(values: &[String]) -> String {
     if values.is_empty() { "—".to_owned() } else { values.join(", ") }
 }
@@ -88,6 +108,14 @@ fn status_text(status: &Status) -> &'static str {
         Status::Done => "done",
         Status::Blocked => "blocked",
         Status::Rejected => "rejected",
+    }
+}
+
+fn artifact_type_text(artifact_type: &ArtifactType) -> &'static str {
+    match artifact_type {
+        ArtifactType::DesignDoc => "design_doc",
+        ArtifactType::Investigation => "investigation",
+        ArtifactType::AuditReport => "audit_report",
     }
 }
 

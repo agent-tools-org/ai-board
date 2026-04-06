@@ -1,6 +1,7 @@
 // SQLite store entry points and connection wrapper.
 // Exports schema, item, and event helpers built on rusqlite.
 
+pub mod artifacts;
 pub mod events;
 pub mod items;
 pub mod schema;
@@ -12,6 +13,11 @@ use std::sync::{Mutex, MutexGuard};
 use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 
+#[allow(unused_imports)]
+pub use artifacts::{
+    GateResult, check_gate, delete_artifact, gen_artifact_id, get_artifact, insert_artifact,
+    list_artifacts,
+};
 #[allow(unused_imports)]
 pub use events::{insert_event, list_all_events, list_events};
 #[allow(unused_imports)]

@@ -1,11 +1,12 @@
 // Work item CRUD, filtering, and scheduling queries for SQLite.
 // Maps crate::types::WorkItem values to normalized store tables.
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Local};
 use rand::Rng;
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter, types::Value};
 
+use super::artifacts::check_gate;
 use crate::types::{Priority, Status, WorkItem};
 
 const ITEM_SELECT: &str = "SELECT id, project, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at FROM items";
@@ -109,8 +110,12 @@ pub fn list_items(conn: &Connection, filter: &ItemFilter) -> Result<Vec<WorkItem
         .collect()
 }
 
-pub fn update_item_status(conn: &Connection, id: &str, status: Status) -> Result<()> {
+pub fn update_item_status(conn: &Connection, id: &str, status: Status, force: bool) -> Result<()> {
     let status = enum_text(&status)?;
+    if !force {
+        let gate = check_gate(conn, id, parse_status(&status)?)?;
+        if !gate.allowed { return Err(anyhow!("Cannot move to {status}: missing {}", gate.missing.join(", "))); }
+    }
     let now = now_text();
     conn.execute(
         "UPDATE items SET status = ?, updated_at = ?, started_at = CASE WHEN ? = 'active' AND started_at IS NULL THEN ? ELSE started_at END, completed_at = CASE WHEN ? = 'done' THEN ? ELSE NULL END WHERE id = ?",
@@ -121,17 +126,11 @@ pub fn update_item_status(conn: &Connection, id: &str, status: Status) -> Result
 
 pub fn update_item(conn: &Connection, id: &str, update: &ItemUpdate) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    let changed = apply_item_update(&tx, id, update)?;
-    if changed {
-        tx.commit()?;
-    }
+    if apply_item_update(&tx, id, update)? { tx.commit()?; }
     Ok(())
 }
 
-pub fn delete_item(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM items WHERE id = ?", params![id])?;
-    Ok(())
-}
+pub fn delete_item(conn: &Connection, id: &str) -> Result<()> { conn.execute("DELETE FROM items WHERE id = ?", params![id])?; Ok(()) }
 
 pub fn next_item(conn: &Connection, project: &str, label: Option<&str>) -> Result<Option<WorkItem>> {
     let mut sql = format!("{ITEM_SELECT} WHERE project = ? AND status = 'ready' AND NOT EXISTS (SELECT 1 FROM item_dependencies d JOIN items dep ON dep.id = d.depends_on WHERE d.item_id = items.id AND dep.status != 'done')");
@@ -156,10 +155,7 @@ pub fn reorder_items(conn: &Connection, updates: &[(String, f64, String)]) -> Re
     Ok(())
 }
 
-pub fn gen_id() -> String {
-    let mut rng = rand::rng();
-    format!("wi-{:04x}", rng.random::<u16>())
-}
+pub fn gen_id() -> String { format!("wi-{:04x}", rand::rng().random::<u16>()) }
 
 fn build_list_query(filter: &ItemFilter) -> (String, Vec<Value>) {
     let mut sql = String::from(ITEM_SELECT);

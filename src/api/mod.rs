@@ -2,6 +2,7 @@
 // Exports: router(), ApiError, AppState, and request helper functions.
 
 pub mod agent;
+pub mod artifacts;
 pub mod items;
 pub mod sse;
 
@@ -23,6 +24,7 @@ pub type AppState = Arc<Store>;
 
 pub fn router(store: Arc<Store>) -> Router {
     Router::new()
+        .merge(artifacts::routes())
         .merge(items::routes())
         .merge(agent::routes())
         .route("/api/stream", get(sse::stream))

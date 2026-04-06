@@ -205,7 +205,7 @@ async fn update(
             ensure_exists(conn, &id)?;
             update_item(conn, &id, &update)?;
             if let Some(status) = body.status {
-                update_item_status(conn, &id, status)?;
+                update_item_status(conn, &id, status, false)?;
             }
             insert_event(conn, &id, HUMAN_ACTOR, "updated", None, None)?;
             get_item(conn, &id)?.ok_or_else(|| anyhow::anyhow!("missing"))
@@ -270,7 +270,7 @@ async fn transition_item(
     store
         .with_connection(|conn| {
             ensure_exists(conn, &id)?;
-            update_item_status(conn, &id, status)?;
+            update_item_status(conn, &id, status, false)?;
             insert_event(conn, &id, HUMAN_ACTOR, action, detail, metadata.as_ref())?;
             get_item(conn, &id)?.ok_or_else(|| anyhow::anyhow!("missing"))
         })

@@ -3,7 +3,7 @@
 
 use clap::{Parser, Subcommand};
 
-use crate::types::{Priority, Status};
+use crate::types::{ArtifactType, Priority, Status};
 
 #[derive(Debug, Parser)]
 #[command(name = "ai-board", version, about = "AI engineering backlog manager")]
@@ -69,6 +69,22 @@ pub enum ItemCommand {
     },
     Show {
         id: String,
+    },
+    Attach {
+        item_id: String,
+        #[arg(long, short = 't')]
+        artifact_type: ArtifactType,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        content: Option<String>,
+        #[arg(long, default_value = "final")]
+        status: String,
+    },
+    Artifacts {
+        item_id: String,
     },
     Update {
         id: String,

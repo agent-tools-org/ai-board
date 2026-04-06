@@ -31,6 +31,14 @@ pub enum Priority {
     Critical,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, clap::ValueEnum, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactType {
+    DesignDoc,
+    Investigation,
+    AuditReport,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkItem {
     pub id: WorkItemId,
@@ -80,6 +88,20 @@ pub struct Event {
     pub detail: Option<String>,
     pub metadata: Option<serde_json::Value>,
     pub created_at: DateTime<Local>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub item_id: WorkItemId,
+    pub artifact_type: ArtifactType,
+    pub title: String,
+    pub path: Option<String>,
+    pub content: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: DateTime<Local>,
+    pub updated_at: DateTime<Local>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
