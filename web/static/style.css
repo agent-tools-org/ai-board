@@ -162,6 +162,18 @@ table.data tr:hover td {background: rgba(255, 255, 255, 0.03);}
 
 .modal-actions {display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem;}
 
+.artifact-expand {background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.7rem; padding: 0 0.25rem;}
+
+.artifact-content {margin: 0.25rem 0 0.5rem 1.75rem; padding: 0.5rem 0.75rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; line-height: 1.6; max-height: 300px; overflow-y: auto;}
+
+.artifact-content h2, .artifact-content h3, .artifact-content h4 {margin: 0.5rem 0 0.25rem; font-size: 0.9rem; color: var(--text);}
+
+.artifact-content code {background: rgba(91,140,255,0.1); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.75rem;}
+
+.artifact-content ul {margin: 0.25rem 0; padding-left: 1.25rem;}
+
+.artifact-content li {margin: 0.1rem 0;}
+
 .is-hidden {display: none !important;}
 
 

@@ -102,6 +102,8 @@ pub enum ItemCommand {
         assignee: Option<String>,
         #[arg(long)]
         position: Option<f64>,
+        #[arg(long, short)]
+        force: bool,
     },
     Delete {
         id: String,

@@ -6,6 +6,18 @@ const ICON = {
 	audit_report: "✅",
 };
 
+function renderMd(src) {
+	return esc(src)
+		.replace(/^### (.+)$/gm, "<h4>$1</h4>")
+		.replace(/^## (.+)$/gm, "<h3>$1</h3>")
+		.replace(/^# (.+)$/gm, "<h2>$1</h2>")
+		.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+		.replace(/`([^`]+)`/g, "<code>$1</code>")
+		.replace(/^- (.+)$/gm, "<li>$1</li>")
+		.replace(/(<li>.*<\/li>)/gs, "<ul>$1</ul>")
+		.replace(/\n/g, "<br>");
+}
+
 function hasFinal(artifacts, type) {
 	return artifacts.some(
 		(a) => a.artifact_type === type && a.status === "final",
@@ -33,13 +45,18 @@ export function artifactsSectionHtml(artifacts, errMsg) {
 			const icon = ICON[af.artifact_type] || "📄";
 			const stClass = af.status === "final" ? "final" : "draft";
 			const aid = esc(af.id);
+			const hasContent = af.content && af.content.trim();
+			const contentBlock = hasContent
+				? `<button type="button" class="artifact-expand" data-af-id="${aid}" aria-label="Toggle content">▶</button><div class="artifact-content is-hidden" data-af-content="${aid}">${renderMd(af.content)}</div>`
+				: "";
 			return `<div class="artifact">
 				<span class="artifact-type" title="${esc(af.artifact_type)}">${icon}</span>
 				<span class="artifact-title">${esc(af.title)}</span>
 				<span class="artifact-status ${stClass}">${esc(af.status)}</span>
 				<span class="artifact-by">${esc(af.created_by || "—")}</span>
+				${hasContent ? `<button type="button" class="artifact-expand" data-af-expand="${aid}" aria-label="Toggle content">▶</button>` : ""}
 				<button type="button" class="artifact-del" data-af-id="${aid}" aria-label="Delete artifact">×</button>
-			</div>`;
+			</div>${hasContent ? `<div class="artifact-content is-hidden" data-af-content="${aid}">${renderMd(af.content)}</div>` : ""}`;
 		})
 		.join("");
 	const err = errMsg
@@ -75,6 +92,15 @@ export function bindArtifactsPanel($, itemId, api, refreshDetail) {
 	if (toggle && form) {
 		toggle.onclick = () => form.classList.toggle("is-hidden");
 	}
+	document.querySelectorAll("[data-af-expand]").forEach((btn) => {
+		btn.onclick = () => {
+			const content = document.querySelector(`[data-af-content="${btn.dataset.afExpand}"]`);
+			if (content) {
+				content.classList.toggle("is-hidden");
+				btn.textContent = content.classList.contains("is-hidden") ? "▶" : "▼";
+			}
+		};
+	});
 	const save = $("#af-save");
 	if (save) {
 		save.onclick = async () => {

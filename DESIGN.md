@@ -144,7 +144,7 @@ Event {
 | Language | Rust | Consistent with aid, shared types possible |
 | Web framework | Axum | Already proven in aid, async, performant |
 | Database | SQLite | Portable, zero-ops, sufficient for single-team scale |
-| Frontend | Leptos (Rust WASM) | Full-Rust stack, type-safe, SSR + hydration, native drag-and-drop |
+| Frontend | Vanilla JS + CSS (embedded) | No build step, lightweight, fast iteration |
 | Real-time | SSE (Server-Sent Events) | Proven in aid, simpler than WebSocket for read-heavy updates |
 | API | REST + JSON | Agent-friendly, simple, well-understood |
 
@@ -165,44 +165,40 @@ ai-board next                     # show highest-priority ready item
 ```
 ai-board/
 ├── Cargo.toml
-├── Trunk.toml                    # Leptos WASM build config
 ├── DESIGN.md                     # this file
 ├── CLAUDE.md                     # dev instructions
 ├── src/
 │   ├── main.rs                   # CLI entry + server boot
 │   ├── cli.rs                    # CLI argument parsing (clap)
-│   ├── types.rs                  # WorkItem, Status, Priority, Event, Board
+│   ├── types.rs                  # WorkItem, Status, Priority, Artifact, Event
+│   ├── render.rs                 # Terminal output formatting
 │   ├── store/
-│   │   ├── mod.rs                # SQLite connection + pool
+│   │   ├── mod.rs                # SQLite connection pool (~/.ai-board/db.sqlite3)
 │   │   ├── schema.rs             # table definitions + migrations
-│   │   ├── items.rs              # work item CRUD
-│   │   ├── events.rs             # event log queries
-│   │   └── boards.rs             # board/view CRUD
+│   │   ├── items.rs              # work item CRUD + gate enforcement
+│   │   ├── artifacts.rs          # artifact CRUD + gate checks
+│   │   └── events.rs             # event log queries
 │   ├── api/
 │   │   ├── mod.rs                # Axum router setup
 │   │   ├── items.rs              # /api/items endpoints
-│   │   ├── boards.rs             # /api/boards endpoints
+│   │   ├── artifacts.rs          # /api/items/{id}/artifacts endpoints
 │   │   ├── agent.rs              # /api/agent/* (agent-facing endpoints)
 │   │   └── sse.rs                # SSE event stream
 │   ├── mcp/
 │   │   ├── mod.rs                # MCP server setup (stdio transport)
-│   │   ├── tools.rs              # Tool definitions (board_next, board_claim, etc.)
-│   │   └── handler.rs            # Tool call handler → store operations
-│   ├── web/
-│   │   ├── mod.rs                # Embedded asset serving + SSR
-│   │   ├── app.rs                # Root Leptos App component + router
-│   │   ├── components/
-│   │   │   ├── board_view.rs     # Kanban columns with drag-and-drop
-│   │   │   ├── list_view.rs      # Table view with sorting
-│   │   │   ├── item_card.rs      # Card component for board view
-│   │   │   ├── item_detail.rs    # Detail panel (sidebar)
-│   │   │   ├── filter_bar.rs     # Status/priority/label filters
-│   │   │   └── header.rs         # Nav bar + view switcher
-│   │   ├── api.rs                # Client-side fetch wrappers
-│   │   └── sse.rs                # Client-side SSE subscription
-│   └── integration/
-│       ├── mod.rs
-│       └── aid.rs                # aid integration (dispatch, callback)
+│   │   ├── tools.rs              # Tool definitions + handlers
+│   │   └── tests.rs              # MCP integration tests
+│   └── web/
+│       └── mod.rs                # Embedded asset serving (rust-embed)
+├── web/
+│   └── static/                   # Frontend SPA (embedded at compile time)
+│       ├── index.html
+│       ├── style.css
+│       ├── app.js                # Main app logic
+│       ├── artifacts.js          # Artifact UI + gate warnings
+│       ├── list.js               # List view
+│       ├── sse.js                # SSE client
+│       └── utils.js              # Shared helpers
 └── tests/
     └── api_tests.rs
 ```
@@ -502,12 +498,12 @@ Separate tools, single workflow. Unix philosophy.
 - GraphQL shines for complex frontend queries, but our frontend is simple
 - REST is easier to call from shell scripts and `curl`
 
-### Why Leptos (not htmx/vanilla JS)?
+### Why Vanilla JS (not Leptos/React)?
 
-- Full-Rust stack — shared types between server and client, no JS/TS toolchain
-- SSR + client hydration — fast initial load, interactive after
-- Native drag-and-drop via web-sys — no JS library needed
-- Trade-off: WASM compile step (Trunk), but single-language development
+- No build step — edit JS/CSS and recompile Rust to embed, zero frontend toolchain
+- Lightweight — total frontend under 600 lines across 6 files
+- Fast iteration — no WASM compile, no hydration complexity
+- Sufficient — the dashboard is read-optimized, agents do the heavy work via API
 
 ### Fractional Indexing for Position
 
@@ -531,9 +527,9 @@ Instead of integer positions (which require renumbering on insert), use f64:
 
 ## Resolved Decisions
 
-1. **Frontend**: Leptos (Rust WASM). Full-Rust stack, strong typing end-to-end, native drag-and-drop support via web-sys. Adds WASM compile step but keeps the entire project in one language.
+1. **Frontend**: Vanilla JS + CSS (embedded via rust-embed). No build step, lightweight, fast iteration.
 2. **MCP**: Yes — ai-board exposes its own MCP server. Claude Code (and other MCP-capable agents) can use board tools directly without curl. See MCP section below.
-3. **Scope**: Per-repo isolation. Each repo gets its own board database (`.ai-board/db.sqlite3`), consistent with aid's per-repo model. A global view can aggregate across repos later.
+3. **Scope**: Centralized DB at `~/.ai-board/db.sqlite3` with `project` as the primary scoping dimension. Project auto-detected from directory name.
 4. **Name**: `ai-board` — simple, clear, pairs with `aid`.
 
 ---
@@ -591,131 +587,114 @@ No HTTP server needed for agent workflows — MCP handles it over stdio.
 
 ---
 
-## Repo Scoping
+## Project Scoping
 
-### Per-Repo Database
+### Centralized Database
 
-Each repo has its own board state:
-
-```
-my-project/
-├── .ai-board/
-│   ├── db.sqlite3              # this repo's board data
-│   └── config.toml             # repo-specific settings
-├── src/
-└── ...
-```
-
-### Config (`config.toml`)
-
-```toml
-[board]
-name = "my-project"
-default_agent = "codex"
-verify = "cargo test"
-auto_dispatch = false            # require manual dispatch by default
-
-[labels]
-presets = ["bug", "feature", "refactor", "docs", "test"]
-
-[approval]
-required_for = ["critical"]      # critical items need human approval
-```
-
-### Global Aggregation (future)
+All projects share a single database at `~/.ai-board/db.sqlite3`. Items are scoped by the `project` field.
 
 ```bash
-ai-board global                  # aggregate view across all repos
-ai-board global --repos ~/dev/project-a ~/dev/project-b
+ai-board item list --project myapp     # list items for one project
+ai-board item list                     # list items for auto-detected project (cwd basename)
+ai-board serve                         # dashboard shows all projects, filterable
+```
+
+### Auto-Detection
+
+When `--project` is not specified, the project name is auto-detected from the current directory name (basename of `$PWD`).
+
+### Workflow Gates
+
+Artifacts enforce process discipline on status transitions:
+
+| Transition | Required Artifact | Bypass |
+|------------|-------------------|--------|
+| `ready → active` | `design_doc` or `investigation` (status: `final`) | `--force` |
+| `active → review/done` | `audit_report` | `--force` |
+
+```bash
+ai-board item attach wi-xxxx -t design_doc --title "Design" --content "# Plan" --status final
+ai-board item update wi-xxxx --status active          # succeeds (gate satisfied)
+ai-board item update wi-xxxx --status done             # fails (missing audit_report)
+ai-board item update wi-xxxx --status done --force     # bypasses gate
 ```
 
 ---
 
-## Leptos Frontend
+## Web Dashboard
 
 ### Architecture
 
-- **Server-side rendering (SSR)** via Axum integration for initial page load
-- **Client-side hydration** for interactivity (drag-and-drop, real-time updates)
-- **Single WASM binary** embedded alongside the server binary via rust-embed
+- **Embedded SPA** — vanilla JS + CSS files in `web/static/`, compiled into the binary via `rust-embed`
+- **No build step** — edit files and `cargo build` embeds them automatically
+- **Modular JS** — split into `app.js`, `artifacts.js`, `list.js`, `sse.js`, `utils.js`
 
-### Component Structure
+### Features
 
-```
-src/web/
-├── app.rs                       # Root App component + router
-├── components/
-│   ├── board_view.rs            # Kanban columns with drag-and-drop
-│   ├── list_view.rs             # Table view with sorting
-│   ├── item_card.rs             # Card component for board view
-│   ├── item_detail.rs           # Detail panel (sidebar/modal)
-│   ├── filter_bar.rs            # Status/priority/label filters
-│   └── header.rs                # Nav bar + view switcher
-├── api.rs                       # Client-side API calls (fetch wrappers)
-└── sse.rs                       # SSE subscription for real-time updates
-```
-
-### Drag-and-Drop
-
-Leptos + web-sys for native HTML5 drag-and-drop:
-- `dragstart` → capture item ID + source column
-- `dragover` → calculate insertion position (fractional index between neighbors)
-- `drop` → `PATCH /api/items/reorder` with new position + status
+- **Board view**: Kanban columns (backlog/ready/active/review/done/blocked/rejected) with drag-and-drop
+- **List view**: Sortable table with all fields
+- **Detail panel**: Right sidebar with edit controls, event history, artifacts section
+- **Filters**: Status, priority, label, project — all as toggle pills
+- **Artifacts**: Create/view/delete artifacts, markdown content preview, gate warnings
+- **SSE**: Real-time updates from `/api/stream`
+- **Responsive**: Column stack on mobile
 
 ### Build
 
 ```bash
-# Development (requires wasm-pack or trunk)
-trunk serve                      # hot-reload frontend
-cargo run -- serve               # backend only
-
-# Production
-trunk build --release            # build WASM
-cargo build --release            # embed WASM into binary
+cargo build --release            # embeds web/static/ via rust-embed
+cargo run -- serve               # start on :3100
 ```
 
 ---
 
 ## Updated Development Phases
 
-### Phase 1: Core + CLI (week 1-2)
-- [ ] Project scaffold (Cargo.toml, types, store)
-- [ ] SQLite store with migrations (`.ai-board/db.sqlite3`)
-- [ ] Work item CRUD
-- [ ] CLI commands: `item create/list/show/update/delete`, `next`
-- [ ] Event logging
-- [ ] Priority queue logic (next item selection)
-- [ ] Dependency tracking and blocked status
-- [ ] Repo-scoped config (`.ai-board/config.toml`)
+### Phase 1: Core + CLI ✅
+- [x] Project scaffold (Cargo.toml, types, store)
+- [x] SQLite store with migrations
+- [x] Work item CRUD
+- [x] CLI commands: `item create/list/show/update/delete`, `next`
+- [x] Event logging
+- [x] Priority queue logic (next item selection)
+- [x] Dependency tracking and blocked status
 
-### Phase 2: REST API + MCP (week 2-3)
-- [ ] Axum server with item endpoints
-- [ ] Agent-facing endpoints (`/api/agent/*`)
-- [ ] SSE event stream
-- [ ] Board CRUD
-- [ ] Reorder/position management
-- [ ] MCP server mode (stdio transport)
-- [ ] MCP tool definitions (board_next, board_claim, etc.)
+### Phase 2: REST API + MCP ✅
+- [x] Axum server with item endpoints
+- [x] Agent-facing endpoints (`/api/agent/*`)
+- [x] SSE event stream
+- [x] Reorder/position management
+- [x] MCP server mode (stdio transport)
+- [x] MCP tool definitions (board_next, board_claim, etc.)
 
-### Phase 3: Leptos Dashboard (week 3-6)
-- [ ] Leptos project setup with Trunk
-- [ ] Board (kanban) view with drag-and-drop
-- [ ] List view with sorting/filtering
-- [ ] Item detail panel (sidebar)
-- [ ] Real-time updates via SSE
-- [ ] Responsive/mobile layout
-- [ ] Embed WASM in release binary
+### Phase 3: Web Dashboard ✅
+- [x] Embedded SPA (vanilla JS + CSS, rust-embed)
+- [x] Board (kanban) view with drag-and-drop
+- [x] List view with sorting/filtering
+- [x] Item detail panel (sidebar)
+- [x] Real-time updates via SSE
+- [x] Responsive/mobile layout
+- [x] Project filter + badges
 
-### Phase 4: aid Integration (week 6-7)
+### Phase 4: Project Scoping + Workflow Gates ✅
+- [x] Centralized DB (`~/.ai-board/db.sqlite3`)
+- [x] `project` as first-class scoping dimension
+- [x] Auto-detect project from directory name
+- [x] Artifacts (design_doc, investigation, audit_report)
+- [x] Gate enforcement on status transitions
+- [x] Artifact content preview with markdown rendering
+- [x] `--force` flag to bypass gates
+
+### Phase 5: aid Integration (planned)
 - [ ] `ai-board dispatch` command (invoke aid)
 - [ ] Hook-based completion callback
 - [ ] Aid task status mirroring
 - [ ] Auto-dispatch for `auto_dispatch: true` items
 
-### Phase 5: Advanced (future)
+### Phase 6: Advanced (future)
 - [ ] Timeline/dependency visualization
 - [ ] Velocity/throughput metrics
 - [ ] Agent performance analytics
-- [ ] Global cross-repo aggregation
+- [ ] Cross-project aggregation dashboard
 - [ ] Approval workflow with notifications
 - [ ] Import/export (markdown, CSV)

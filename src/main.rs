@@ -40,8 +40,8 @@ fn handle_item(command: ItemCommand) -> Result<()> {
         ItemCommand::Attach { item_id, artifact_type, title, path, content, status } =>
             handle_attach(&item_id, artifact_type, title, path, content, status),
         ItemCommand::Artifacts { item_id } => handle_artifacts(&item_id),
-        ItemCommand::Update { id, title, description, priority, status, label, assignee, position } =>
-            handle_update(&id, title, description, priority, status, label, assignee, position),
+        ItemCommand::Update { id, title, description, priority, status, label, assignee, position, force } =>
+            handle_update(&id, title, description, priority, status, label, assignee, position, force),
         ItemCommand::Delete { id } => handle_delete(&id),
     }
 }
@@ -161,6 +161,7 @@ fn handle_update(
     label: Vec<String>,
     assignee: Option<String>,
     position: Option<f64>,
+    force: bool,
 ) -> Result<()> {
     let store = open_store()?;
     let _ = load_item(&store.connection(), id)?;
@@ -187,7 +188,7 @@ fn handle_update(
             due_date: None,
         },
     )?;
-    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status, false)?; }
+    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status, force)?; }
     crate::store::insert_event(&store.connection(), id, "human:cli", "updated", Some("Updated via CLI"), None)?;
     println!("Updated {id}");
     Ok(())
