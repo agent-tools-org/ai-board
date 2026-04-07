@@ -4,6 +4,10 @@ version = "0.2.0"
 edition = "2024"
 description = "AI engineering backlog manager — persistent task board for AI agents with human oversight dashboard"
 license = "MIT"
+repository = "https://github.com/agent-tools-org/ai-board"
+homepage = "https://github.com/agent-tools-org/ai-board"
+keywords = ["ai", "backlog", "task-board", "mcp", "agents"]
+categories = ["command-line-utilities", "development-tools"]
 default-run = "ai-board"
 
 [[bin]]

@@ -13,14 +13,8 @@ use std::sync::{Mutex, MutexGuard};
 use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 
-#[allow(unused_imports)]
-pub use artifacts::{
-    GateResult, check_gate, delete_artifact, gen_artifact_id, get_artifact, insert_artifact,
-    list_artifacts,
-};
-#[allow(unused_imports)]
+pub use artifacts::{delete_artifact, gen_artifact_id, get_artifact, insert_artifact, list_artifacts};
 pub use events::{insert_event, list_all_events, list_events};
-#[allow(unused_imports)]
 pub use items::{
     ItemFilter, ItemUpdate, delete_item, gen_id, get_item, insert_item, list_items, next_item,
     reorder_items, update_item, update_item_status,
@@ -49,13 +43,6 @@ impl Store {
 
     pub fn connection(&self) -> MutexGuard<'_, Connection> {
         lock_connection(&self.conn)
-    }
-
-    pub fn into_inner(self) -> Connection {
-        match self.conn.into_inner() {
-            Ok(conn) => conn,
-            Err(poisoned) => poisoned.into_inner(),
-        }
     }
 
     pub fn with_connection<F, T>(&self, f: F) -> Result<T>
@@ -117,22 +104,6 @@ mod tests {
         assert_eq!(foreign_keys, 1);
 
         drop(store);
-        cleanup_db_files(&path);
-    }
-
-    #[test]
-    fn into_inner_returns_usable_connection() {
-        let path = test_db_path();
-        let store = Store::open(&path).expect("open store");
-
-        let conn = store.into_inner();
-        let value: i64 = conn
-            .query_row("SELECT 1", [], |row| row.get(0))
-            .expect("query inner connection");
-
-        assert_eq!(value, 1);
-
-        drop(conn);
         cleanup_db_files(&path);
     }
 

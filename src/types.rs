@@ -1,4 +1,4 @@
-// Core domain types: WorkItem, Status, Priority, Event, Board
+// Core domain types: WorkItem, Status, Priority, Event, Artifact
 // All shared types used across store, API, and CLI layers
 
 use chrono::{DateTime, Local};
@@ -6,9 +6,6 @@ use serde::{Deserialize, Serialize};
 
 /// Short hex ID for work items (e.g., "wi-a3f8")
 pub type WorkItemId = String;
-
-/// Short hex ID for boards (e.g., "bd-01")
-pub type BoardId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -100,17 +97,6 @@ pub struct Artifact {
     pub content: String,
     pub status: String,
     pub created_by: String,
-    pub created_at: DateTime<Local>,
-    pub updated_at: DateTime<Local>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Board {
-    pub id: BoardId,
-    pub name: String,
-    pub filter: Option<serde_json::Value>,
-    pub sort_by: String,
-    pub columns: Option<Vec<String>>,
     pub created_at: DateTime<Local>,
     pub updated_at: DateTime<Local>,
 }

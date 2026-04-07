@@ -4,5 +4,4 @@
 *.sqlite3-shm
 .DS_Store
 .ai-board/
-result.md
 .aid-lock
