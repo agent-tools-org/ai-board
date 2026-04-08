@@ -1,6 +1,6 @@
 [package]
 name = "ai-board"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "AI engineering backlog manager — persistent task board for AI agents with human oversight dashboard"
 license = "MIT"
