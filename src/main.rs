@@ -15,7 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::Local;
 use clap::Parser;
 
-use crate::cli::{Cli, Command, ItemCommand, NextArgs, ServeArgs};
+use crate::cli::{Cli, Command, CreateArgs, ItemCommand, ListArgs, NextArgs, ServeArgs, UpdateArgs};
 use crate::render::{print_artifacts, print_item, print_list};
 use crate::store::{ItemFilter, ItemUpdate, Store};
 use crate::types::{Artifact, ArtifactType, Priority, Status, WorkItem};
@@ -23,6 +23,11 @@ use crate::types::{Artifact, ArtifactType, Priority, Status, WorkItem};
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Item { command } => handle_item(command),
+        Command::Create(args) => handle_create_args(args),
+        Command::List(args) => handle_list_args(args),
+        Command::Show { id } => handle_show(&id),
+        Command::Update(args) => handle_update_args(args),
+        Command::Delete { id } => handle_delete(&id),
         Command::Mcp => handle_mcp(),
         Command::Next(args) => handle_next(args),
         Command::Serve(args) => handle_serve(args),
@@ -32,62 +37,46 @@ fn main() -> Result<()> {
 
 fn handle_item(command: ItemCommand) -> Result<()> {
     match command {
-        ItemCommand::Create { title, project, description, priority, label, parent, depends_on, assignee, agent, verify, estimate, due_date, auto_dispatch } =>
-            handle_create(title, project, description, priority, label, parent, depends_on, assignee, agent, verify, estimate, due_date, auto_dispatch),
-        ItemCommand::List { project, status, priority, label, assignee, limit } =>
-            handle_list(project, status, priority, label, assignee, limit),
+        ItemCommand::Create(args) => handle_create_args(args),
+        ItemCommand::List(args) => handle_list_args(args),
         ItemCommand::Show { id } => handle_show(&id),
         ItemCommand::Attach { item_id, artifact_type, title, path, content, status } =>
             handle_attach(&item_id, artifact_type, title, path, content, status),
         ItemCommand::Artifacts { item_id } => handle_artifacts(&item_id),
-        ItemCommand::Update { id, title, description, priority, status, label, assignee, position, force } =>
-            handle_update(&id, title, description, priority, status, label, assignee, position, force),
+        ItemCommand::Update(args) => handle_update_args(args),
         ItemCommand::Delete { id } => handle_delete(&id),
     }
 }
 
-fn handle_create(
-    title: String,
-    project: Option<String>,
-    description: Option<String>,
-    priority: Priority,
-    label: Vec<String>,
-    parent: Option<String>,
-    depends_on: Vec<String>,
-    assignee: Option<String>,
-    agent: Option<String>,
-    verify: Option<String>,
-    estimate: Option<String>,
-    due_date: Option<String>,
-    auto_dispatch: bool,
-) -> Result<()> {
+fn handle_create_args(args: CreateArgs) -> Result<()> {
+    let title = args.title().ok_or_else(|| anyhow!("title is required — provide as positional arg or --title"))?.to_owned();
     let store = open_store()?;
     let now = Local::now();
     let item = WorkItem {
         id: crate::store::gen_id(),
-        project: detect_project(project)?,
+        project: detect_project(args.project)?,
         repo_path: repo_path()?,
         title,
-        description: description.unwrap_or_default(),
+        description: args.description.unwrap_or_default(),
         status: Status::Backlog,
-        priority,
+        priority: args.priority,
         position: now.timestamp_millis() as f64,
-        labels: label,
-        parent_id: parent,
-        depends_on,
+        labels: args.label,
+        parent_id: args.parent,
+        depends_on: args.depends_on,
         aid_task_ids: Vec::new(),
-        aid_agent: agent,
-        aid_verify: verify,
-        estimate,
-        assignee,
+        aid_agent: args.agent,
+        aid_verify: args.verify,
+        estimate: args.estimate,
+        assignee: args.assignee,
         created_by: "human:cli".to_owned(),
         requires_approval: false,
-        auto_dispatch,
+        auto_dispatch: args.auto_dispatch,
         created_at: now,
         updated_at: now,
         started_at: None,
         completed_at: None,
-        due_date,
+        due_date: args.due_date,
     };
     crate::store::insert_item(&store.connection(), &item)?;
     crate::store::insert_event(&store.connection(), &item.id, "human:cli", "created", Some("Created via CLI"), None)?;
@@ -95,16 +84,9 @@ fn handle_create(
     Ok(())
 }
 
-fn handle_list(
-    project: Option<String>,
-    status: Option<Status>,
-    priority: Option<Priority>,
-    label: Option<String>,
-    assignee: Option<String>,
-    limit: usize,
-) -> Result<()> {
+fn handle_list_args(args: ListArgs) -> Result<()> {
     let store = open_store()?;
-    let items = crate::store::list_items(&store.connection(), &item_filter(project, status, priority, label, assignee, limit)?)?;
+    let items = crate::store::list_items(&store.connection(), &item_filter(args.project, args.status, args.priority, args.label, args.assignee, args.limit)?)?;
     print_list(&items);
     Ok(())
 }
@@ -152,18 +134,9 @@ fn handle_artifacts(item_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn handle_update(
-    id: &str,
-    title: Option<String>,
-    description: Option<String>,
-    priority: Option<Priority>,
-    status: Option<Status>,
-    label: Vec<String>,
-    assignee: Option<String>,
-    position: Option<f64>,
-    force: bool,
-) -> Result<()> {
+fn handle_update_args(args: UpdateArgs) -> Result<()> {
     let store = open_store()?;
+    let id = &args.id;
     let _ = load_item(&store.connection(), id)?;
     crate::store::update_item(
         &store.connection(),
@@ -171,24 +144,24 @@ fn handle_update(
         &ItemUpdate {
             project: None,
             repo_path: None,
-            title,
-            description,
-            priority,
-            position,
-            labels: (!label.is_empty()).then_some(label),
+            title: args.title,
+            description: args.description,
+            priority: args.priority,
+            position: args.position,
+            labels: (!args.label.is_empty()).then_some(args.label),
             parent_id: None,
             depends_on: None,
             aid_task_ids: None,
             aid_agent: None,
             aid_verify: None,
             estimate: None,
-            assignee: assignee.map(Some),
+            assignee: args.assignee.map(Some),
             requires_approval: None,
             auto_dispatch: None,
             due_date: None,
         },
     )?;
-    if let Some(status) = status { crate::store::update_item_status(&store.connection(), id, status, force)?; }
+    if let Some(status) = args.status { crate::store::update_item_status(&store.connection(), id, status, args.force)?; }
     crate::store::insert_event(&store.connection(), id, "human:cli", "updated", Some("Updated via CLI"), None)?;
     println!("Updated {id}");
     Ok(())
