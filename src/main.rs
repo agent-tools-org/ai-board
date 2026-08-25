@@ -147,6 +147,7 @@ fn handle_artifacts(item_id: &str) -> Result<()> {
 }
 
 fn handle_update_args(args: UpdateArgs) -> Result<()> {
+    let project = args.project.map(validate_project).transpose()?;
     let store = open_store()?;
     let id = &args.id;
     let _ = load_item(&store.connection(), id)?;
@@ -154,7 +155,7 @@ fn handle_update_args(args: UpdateArgs) -> Result<()> {
         &store.connection(),
         id,
         &ItemUpdate {
-            project: None,
+            project,
             repo_path: None,
             title: args.title,
             description: args.description,
@@ -264,21 +265,23 @@ fn detect_project(explicit: Option<String>) -> Result<String> {
     dir.file_name().and_then(|name| name.to_str()).map(str::to_owned).ok_or_else(|| anyhow!("cannot detect project name from current directory"))
 }
 
+fn create_project(explicit: Option<String>) -> Result<String> {
+    detect_project(explicit.map(validate_project).transpose()?)
+}
+
 /// `-p` is `--project`; `-p high` used to file the item under a project literally named
 /// "high" and silently lose the intended priority.
-fn create_project(explicit: Option<String>) -> Result<String> {
+fn validate_project(project: String) -> Result<String> {
     const RESERVED: [&str; 11] = [
         "critical", "high", "medium", "low", "backlog", "ready", "active", "review", "done",
         "blocked", "rejected",
     ];
-    if let Some(project) = explicit.as_deref()
-        && RESERVED.contains(&project.to_ascii_lowercase().as_str())
-    {
+    if RESERVED.contains(&project.to_ascii_lowercase().as_str()) {
         return Err(anyhow!(
             "-p/--project got '{project}', which is a priority/status name, not a project. Priority is --priority {project} and status is set with `item update --status`."
         ));
     }
-    detect_project(explicit)
+    Ok(project)
 }
 
 fn repo_path() -> Result<String> {

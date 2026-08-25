@@ -137,6 +137,9 @@ pub struct ListArgs {
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
     pub id: String,
+    /// Move the item to another project
+    #[arg(long, short)]
+    pub project: Option<String>,
     #[arg(long)]
     pub title: Option<String>,
     #[arg(long, short = 'd')]
