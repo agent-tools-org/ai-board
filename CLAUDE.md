@@ -16,6 +16,7 @@ AI engineering backlog manager. Persistent task board where AI agents are the pr
 cargo run -- serve              # start server on :3100 (dashboard + API)
 cargo run -- item create "Fix parser" --priority high --project myapp
 cargo run -- item list --project myapp
+cargo run -- item list --all                    # every project (adds a PROJECT column)
 cargo run -- next --project myapp
 cargo run -- item attach wi-xxxx -t design_doc --title "Design" --content "# Plan\n..."
 cargo run -- item artifacts wi-xxxx
@@ -28,6 +29,8 @@ cargo run -- mcp                # start MCP server (stdio)
 
 ### Project Scoping
 Items are organized by `project` (auto-detected from current directory name, or `--project`/`-p`). Centralized DB at `~/.ai-board/db.sqlite3` holds all projects.
+
+Scope is invisible unless the tool says so, so `list` prints its project, item count, and any `--limit` cut-off; `show`/`next` print `Project:`; `next` names the projects that do hold ready work. `-p` is `--project` only — priority has no short flag, and passing a priority word to `-p` is rejected.
 
 ### Workflow Gates
 Status transitions enforce artifact requirements:

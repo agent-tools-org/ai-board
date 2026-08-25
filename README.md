@@ -71,7 +71,8 @@ ai-board mcp                               # Start MCP server (stdio)
 
 # Items
 ai-board item create "Title" [options]     # Create work item
-ai-board item list [--status ready]        # List items (filterable)
+ai-board item list [--status ready]        # List items (filterable, current project)
+ai-board item list --all                   # List items across every project
 ai-board item show <id>                    # Show item details + history
 ai-board item update <id> [--status ...]   # Update item fields
 ai-board item delete <id>                  # Delete item
@@ -89,7 +90,7 @@ ai-board next [--project myapp]            # Highest-priority ready item
 | Flag | Description |
 |------|-------------|
 | `--project`, `-p` | Project name (default: current dir name) |
-| `--priority` | `low`, `medium`, `high`, `critical` |
+| `--priority` | `low`, `medium`, `high`, `critical` — long flag only, `-p` is `--project` |
 | `--label` | Labels (repeatable) |
 | `--parent` | Parent work item ID |
 | `--depends-on` | Dependency IDs (repeatable) |
@@ -107,7 +108,20 @@ All projects share a centralized database at `~/.ai-board/db.sqlite3`. Items are
 cd ~/projects/myapp
 ai-board item list                # lists items for "myapp"
 ai-board item list -p other-app   # lists items for "other-app"
+ai-board item list --all          # every project, with a PROJECT column
 ```
+
+Every listing prints the scope it queried in its header, so an item filed under another
+project is never missing without an explanation:
+
+```
+project: myapp · 12 item(s) · -A/--all lists every project
+```
+
+`next` is scoped the same way and names the projects that do hold ready work when the
+current one has none. Because scope follows the directory, file a hand-off item with the
+`-p` the next session will run under and verify it with `ai-board next -p <project>` —
+`show` looks items up by id and is project-blind.
 
 ## Workflow Gates
 
