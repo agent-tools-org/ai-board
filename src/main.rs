@@ -4,6 +4,7 @@
 mod api;
 mod cli;
 mod mcp;
+mod next;
 mod render;
 mod store;
 mod types;
@@ -16,6 +17,7 @@ use chrono::Local;
 use clap::Parser;
 
 use crate::cli::{Cli, Command, CreateArgs, ItemCommand, ListArgs, NextArgs, ServeArgs, UpdateArgs};
+use crate::next::Pick;
 use crate::render::{print_artifacts, print_item, print_list};
 use crate::store::{ItemFilter, ItemUpdate, Store};
 use crate::types::{Artifact, ArtifactType, Status, WorkItem};
@@ -94,11 +96,13 @@ fn handle_list_args(args: ListArgs) -> Result<()> {
         label: args.label,
         assignee: args.assignee,
         project: project.clone(),
-        limit: Some(args.limit),
+        // One extra row turns "cut off by --limit" from a guess into an observation.
+        limit: Some(args.limit.saturating_add(1)),
         ..ItemFilter::default()
     };
-    let items = crate::store::list_items(&store.connection(), &filter)?;
-    let truncated = items.len() >= args.limit;
+    let mut items = crate::store::list_items(&store.connection(), &filter)?;
+    let truncated = items.len() > args.limit;
+    items.truncate(args.limit);
     print_list(&items, project.as_deref(), truncated);
     Ok(())
 }
@@ -191,33 +195,22 @@ fn handle_delete(id: &str) -> Result<()> {
 fn handle_next(args: NextArgs) -> Result<()> {
     let store = open_store()?;
     let project = detect_project(args.project)?;
-    // One guard for the whole match: `Store::connection` is not reentrant, and a match
-    // scrutinee keeps its temporary alive across every arm.
-    let conn = store.connection();
-    match crate::store::next_item(&conn, &project, args.label.as_deref())? {
-        Some(item) => print_item(&item, &crate::store::list_events(&conn, &item.id, Some(10))?),
-        None => {
-            println!("No ready items in project '{project}'");
-            let elsewhere = ready_elsewhere(&conn, &project)?;
+    match crate::next::pick(&store, &project, args.label.as_deref())? {
+        Pick::Found(item, events) => print_item(&item, &events),
+        Pick::Empty { elsewhere } => {
+            // "nothing pickable", not "no ready items": an item can be ready and still be
+            // waiting on a dependency, and a label filter narrows the search too.
+            let scope = match args.label.as_deref() {
+                Some(label) => format!("project '{project}' with label '{label}'"),
+                None => format!("project '{project}'"),
+            };
+            println!("Nothing ready to pick up in {scope}");
             if !elsewhere.is_empty() {
-                println!("Ready items exist in: {} (use --project <name>)", elsewhere.join(", "));
+                println!("Ready and unblocked in: {} (use --project <name>)", elsewhere.join(", "));
             }
         }
     }
     Ok(())
-}
-
-/// Other projects that hold ready items, so an empty result never reads as "nothing to do".
-fn ready_elsewhere(conn: &rusqlite::Connection, project: &str) -> Result<Vec<String>> {
-    let filter = ItemFilter { status: Some(Status::Ready), ..ItemFilter::default() };
-    let mut projects: Vec<String> = crate::store::list_items(conn, &filter)?
-        .into_iter()
-        .map(|item| item.project)
-        .filter(|candidate| candidate != project)
-        .collect();
-    projects.sort();
-    projects.dedup();
-    Ok(projects)
 }
 
 fn handle_serve(args: ServeArgs) -> Result<()> {
@@ -270,15 +263,13 @@ fn create_project(explicit: Option<String>) -> Result<String> {
 }
 
 /// `-p` is `--project`; `-p high` used to file the item under a project literally named
-/// "high" and silently lose the intended priority.
+/// "high" and silently lose the intended priority. Only the priority words are refused —
+/// `review` or `done` are odd project names but nothing on the command line confuses them.
 fn validate_project(project: String) -> Result<String> {
-    const RESERVED: [&str; 11] = [
-        "critical", "high", "medium", "low", "backlog", "ready", "active", "review", "done",
-        "blocked", "rejected",
-    ];
-    if RESERVED.contains(&project.to_ascii_lowercase().as_str()) {
+    const PRIORITIES: [&str; 4] = ["critical", "high", "medium", "low"];
+    if PRIORITIES.contains(&project.to_ascii_lowercase().as_str()) {
         return Err(anyhow!(
-            "-p/--project got '{project}', which is a priority/status name, not a project. Priority is --priority {project} and status is set with `item update --status`."
+            "-p/--project got '{project}', which is a priority, not a project. Priority is `--priority {project}` — it has no short flag."
         ));
     }
     Ok(project)

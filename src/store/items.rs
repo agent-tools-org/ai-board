@@ -7,46 +7,17 @@ use rand::Rng;
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter, types::Value};
 
 use super::artifacts::check_gate;
+use super::filters::{ItemFilter, ItemUpdate};
 use crate::types::{Priority, Status, WorkItem};
 
 const ITEM_SELECT: &str = "SELECT id, project, repo_path, title, description, status, priority, position, parent_id, assignee, created_by, requires_approval, auto_dispatch, estimate, aid_agent, aid_verify, due_date, created_at, updated_at, started_at, completed_at FROM items";
 const STATUS_ORDER_SQL: &str =
     "CASE status WHEN 'backlog' THEN 0 WHEN 'ready' THEN 1 WHEN 'active' THEN 2 WHEN 'review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'rejected' THEN 6 ELSE 7 END";
+/// A row `next` is allowed to hand out: ready, and every dependency already done.
+const PICKABLE_SQL: &str =
+    "status = 'ready' AND NOT EXISTS (SELECT 1 FROM item_dependencies d JOIN items dep ON dep.id = d.depends_on WHERE d.item_id = items.id AND dep.status != 'done')";
 const PRIORITY_ORDER_SQL: &str =
     "CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END";
-
-#[derive(Default)]
-pub struct ItemFilter {
-    pub status: Option<Status>,
-    pub priority: Option<Priority>,
-    pub label: Option<String>,
-    pub assignee: Option<String>,
-    pub parent_id: Option<String>,
-    pub project: Option<String>,
-    pub repo_path: Option<String>,
-    pub limit: Option<usize>,
-}
-
-#[derive(Default)]
-pub struct ItemUpdate {
-    pub project: Option<String>,
-    pub repo_path: Option<String>,
-    pub title: Option<String>,
-    pub description: Option<String>,
-    pub priority: Option<Priority>,
-    pub position: Option<f64>,
-    pub labels: Option<Vec<String>>,
-    pub parent_id: Option<Option<String>>,
-    pub depends_on: Option<Vec<String>>,
-    pub aid_task_ids: Option<Vec<String>>,
-    pub aid_agent: Option<Option<String>>,
-    pub aid_verify: Option<Option<String>>,
-    pub estimate: Option<Option<String>>,
-    pub assignee: Option<Option<String>>,
-    pub requires_approval: Option<bool>,
-    pub auto_dispatch: Option<bool>,
-    pub due_date: Option<Option<String>>,
-}
 
 struct ItemRow {
     id: String,
@@ -133,12 +104,34 @@ pub fn update_item(conn: &Connection, id: &str, update: &ItemUpdate) -> Result<(
 pub fn delete_item(conn: &Connection, id: &str) -> Result<()> { conn.execute("DELETE FROM items WHERE id = ?", params![id])?; Ok(()) }
 
 pub fn next_item(conn: &Connection, project: &str, label: Option<&str>) -> Result<Option<WorkItem>> {
-    let mut sql = format!("{ITEM_SELECT} WHERE project = ? AND status = 'ready' AND NOT EXISTS (SELECT 1 FROM item_dependencies d JOIN items dep ON dep.id = d.depends_on WHERE d.item_id = items.id AND dep.status != 'done')");
     let mut params = vec![Value::from(project.to_owned())];
-    if let Some(label) = label { sql.push_str(" AND EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = items.id AND l.label = ?)"); params.push(Value::from(label.to_owned())); }
-    sql.push_str(&format!(" ORDER BY {PRIORITY_ORDER_SQL}, position ASC LIMIT 1"));
+    let label_sql = label_clause(label, &mut params);
+    let sql = format!(
+        "{ITEM_SELECT} WHERE project = ? AND {PICKABLE_SQL}{label_sql} ORDER BY {PRIORITY_ORDER_SQL}, position ASC LIMIT 1"
+    );
     let row = conn.query_row(&sql, params_from_iter(params.iter()), read_item_row).optional()?;
     row.map(|row| build_item(conn, row)).transpose()
+}
+
+/// Projects where `next_item` would return something. Shares `PICKABLE_SQL` with it, so a
+/// "look elsewhere" hint can never name a project that `next` then calls empty.
+pub fn projects_with_next(conn: &Connection, label: Option<&str>) -> Result<Vec<String>> {
+    let mut params = Vec::new();
+    let label_sql = label_clause(label, &mut params);
+    let sql = format!("SELECT DISTINCT project FROM items WHERE {PICKABLE_SQL}{label_sql} ORDER BY project");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(params.iter()), |row| row.get(0))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+}
+
+fn label_clause(label: Option<&str>, params: &mut Vec<Value>) -> String {
+    match label {
+        Some(label) => {
+            params.push(Value::from(label.to_owned()));
+            " AND EXISTS (SELECT 1 FROM item_labels l WHERE l.item_id = items.id AND l.label = ?)".to_owned()
+        }
+        None => String::new(),
+    }
 }
 
 pub fn reorder_items(conn: &Connection, updates: &[(String, f64, String)]) -> Result<()> {

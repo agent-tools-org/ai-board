@@ -12,8 +12,9 @@ const WHITE: &str = "\x1b[37m";
 const DIM: &str = "\x1b[2m";
 
 /// Prints a listing. `project` is the scope that was queried; `None` means every project,
-/// which adds a PROJECT column so rows stay identifiable. Every way a row can be missing
-/// from the output — project scope, `--limit` — is named in the header.
+/// which adds a PROJECT column so rows stay identifiable. The header names the two ways a
+/// row goes missing without the caller asking — project scope and the `--limit` cut-off.
+/// Explicit `--status`/`--priority`/`--label`/`--assignee` filters speak for themselves.
 pub fn print_list(items: &[WorkItem], project: Option<&str>, truncated: bool) {
     let scope = match project {
         Some(project) => format!("project: {project}"),

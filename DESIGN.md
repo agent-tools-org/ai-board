@@ -172,9 +172,11 @@ ai-board/
 │   ├── cli.rs                    # CLI argument parsing (clap)
 │   ├── types.rs                  # WorkItem, Status, Priority, Artifact, Event
 │   ├── render.rs                 # Terminal output formatting
+│   ├── next.rs                   # `next` selection + why an empty result is empty
 │   ├── store/
-│   │   ├── mod.rs                # SQLite connection pool (~/.ai-board/db.sqlite3)
+│   │   ├── mod.rs                # SQLite connection (~/.ai-board/db.sqlite3); guard is NOT reentrant
 │   │   ├── schema.rs             # table definitions + migrations
+│   │   ├── filters.rs            # ItemFilter / ItemUpdate query shapes
 │   │   ├── items.rs              # work item CRUD + gate enforcement
 │   │   ├── artifacts.rs          # artifact CRUD + gate checks
 │   │   └── events.rs             # event log queries
@@ -199,9 +201,10 @@ ai-board/
 │       ├── list.js               # List view
 │       ├── sse.js                # SSE client
 │       └── utils.js              # Shared helpers
-└── tests/
-    └── api_tests.rs
 ```
+
+Tests live beside the code they cover (`src/store/mod.rs`, `src/store/artifacts.rs`,
+`src/next.rs`, `src/mcp/tests.rs`); there is no top-level `tests/` directory.
 
 ---
 
@@ -596,6 +599,11 @@ All projects share a single database at `~/.ai-board/db.sqlite3`. Items are scop
 ```bash
 ai-board item list --project myapp     # list items for one project
 ai-board item list                     # list items for auto-detected project (cwd basename)
+ai-board item list --all               # list items across every project
+
+Every listing names the scope it queried in its header, so a row is never absent without a
+stated reason: `project: myapp · 12 item(s) · -A/--all lists every project`, plus
+`cut off by --limit` when the result hit the cap.
 ai-board serve                         # dashboard shows all projects, filterable
 ```
 

@@ -3,6 +3,7 @@
 
 pub mod artifacts;
 pub mod events;
+pub mod filters;
 pub mod items;
 pub mod schema;
 
@@ -15,8 +16,9 @@ use rusqlite::Connection;
 
 pub use artifacts::{delete_artifact, gen_artifact_id, get_artifact, insert_artifact, list_artifacts};
 pub use events::{insert_event, list_all_events, list_events};
+pub use filters::{ItemFilter, ItemUpdate};
 pub use items::{
-    ItemFilter, ItemUpdate, delete_item, gen_id, get_item, insert_item, list_items, next_item,
+    delete_item, gen_id, get_item, insert_item, list_items, next_item, projects_with_next,
     reorder_items, update_item, update_item_status,
 };
 pub use schema::init_schema;
