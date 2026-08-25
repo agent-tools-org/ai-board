@@ -11,31 +11,60 @@ const YELLOW: &str = "\x1b[33m";
 const WHITE: &str = "\x1b[37m";
 const DIM: &str = "\x1b[2m";
 
-pub fn print_list(items: &[WorkItem]) {
-    println!(
-        "{} {} {} {} {} UPDATED",
-        pad("ID", 8),
-        pad("PRI", 8),
-        pad("STATUS", 8),
-        pad("TITLE", 24),
-        pad("ASSIGNEE", 12),
-    );
-    for item in items {
-        println!(
-            "{} {} {} {} {} {}",
-            pad(&item.id, 8),
-            color_priority(&pad(priority_text(&item.priority), 8), &item.priority),
-            pad(status_text(&item.status), 8),
-            pad(&item.title, 24),
-            pad(item.assignee.as_deref().unwrap_or("—"), 12),
-            relative_time(item.updated_at),
-        );
+/// Prints a listing. `project` is the scope that was queried; `None` means every project,
+/// which adds a PROJECT column so rows stay identifiable. Every way a row can be missing
+/// from the output — project scope, `--limit` — is named in the header.
+pub fn print_list(items: &[WorkItem], project: Option<&str>, truncated: bool) {
+    let scope = match project {
+        Some(project) => format!("project: {project}"),
+        None => "all projects".to_owned(),
+    };
+    let mut notes = vec![format!("{} item(s)", items.len())];
+    if truncated {
+        notes.push("cut off by --limit".to_owned());
     }
+    if project.is_some() {
+        notes.push("-A/--all lists every project".to_owned());
+    }
+    println!("{DIM}{scope} · {}{RESET}", notes.join(" · "));
+    let with_project = project.is_none();
+    println!("{}", list_header(with_project));
+    for item in items {
+        println!("{}", list_row(item, with_project));
+    }
+}
+
+fn list_header(with_project: bool) -> String {
+    let mut columns = vec![pad("ID", 8), pad("PRI", 8), pad("STATUS", 8)];
+    if with_project {
+        columns.push(pad("PROJECT", 16));
+    }
+    columns.push(pad("TITLE", 24));
+    columns.push(pad("ASSIGNEE", 12));
+    columns.push("UPDATED".to_owned());
+    columns.join(" ")
+}
+
+fn list_row(item: &WorkItem, with_project: bool) -> String {
+    let mut columns = vec![
+        pad(&item.id, 8),
+        color_priority(&pad(priority_text(&item.priority), 8), &item.priority),
+        pad(status_text(&item.status), 8),
+    ];
+    if with_project {
+        columns.push(pad(&item.project, 16));
+    }
+    columns.push(pad(&item.title, 24));
+    columns.push(pad(item.assignee.as_deref().unwrap_or("—"), 12));
+    columns.push(relative_time(item.updated_at));
+    columns.join(" ")
 }
 
 pub fn print_item(item: &WorkItem, events: &[Event]) {
     println!("ID: {}", item.id);
     println!("Title: {}", item.title);
+    println!("Project: {}", item.project);
+    println!("Repo: {}", item.repo_path);
     println!("Status: {}", status_text(&item.status));
     println!("Priority: {}", priority_text(&item.priority));
     println!("Assignee: {}", item.assignee.as_deref().unwrap_or("—"));

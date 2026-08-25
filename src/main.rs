@@ -18,7 +18,7 @@ use clap::Parser;
 use crate::cli::{Cli, Command, CreateArgs, ItemCommand, ListArgs, NextArgs, ServeArgs, UpdateArgs};
 use crate::render::{print_artifacts, print_item, print_list};
 use crate::store::{ItemFilter, ItemUpdate, Store};
-use crate::types::{Artifact, ArtifactType, Priority, Status, WorkItem};
+use crate::types::{Artifact, ArtifactType, Status, WorkItem};
 
 fn main() -> Result<()> {
     match Cli::parse().command {
@@ -50,11 +50,12 @@ fn handle_item(command: ItemCommand) -> Result<()> {
 
 fn handle_create_args(args: CreateArgs) -> Result<()> {
     let title = args.title().ok_or_else(|| anyhow!("title is required — provide as positional arg or --title"))?.to_owned();
+    let project = create_project(args.project)?;
     let store = open_store()?;
     let now = Local::now();
     let item = WorkItem {
         id: crate::store::gen_id(),
-        project: detect_project(args.project)?,
+        project,
         repo_path: repo_path()?,
         title,
         description: args.description.unwrap_or_default(),
@@ -86,8 +87,19 @@ fn handle_create_args(args: CreateArgs) -> Result<()> {
 
 fn handle_list_args(args: ListArgs) -> Result<()> {
     let store = open_store()?;
-    let items = crate::store::list_items(&store.connection(), &item_filter(args.project, args.status, args.priority, args.label, args.assignee, args.limit)?)?;
-    print_list(&items);
+    let project = if args.all { None } else { Some(detect_project(args.project)?) };
+    let filter = ItemFilter {
+        status: args.status,
+        priority: args.priority,
+        label: args.label,
+        assignee: args.assignee,
+        project: project.clone(),
+        limit: Some(args.limit),
+        ..ItemFilter::default()
+    };
+    let items = crate::store::list_items(&store.connection(), &filter)?;
+    let truncated = items.len() >= args.limit;
+    print_list(&items, project.as_deref(), truncated);
     Ok(())
 }
 
@@ -178,11 +190,33 @@ fn handle_delete(id: &str) -> Result<()> {
 fn handle_next(args: NextArgs) -> Result<()> {
     let store = open_store()?;
     let project = detect_project(args.project)?;
-    match crate::store::next_item(&store.connection(), &project, args.label.as_deref())? {
-        Some(item) => print_item(&item, &crate::store::list_events(&store.connection(), &item.id, Some(10))?),
-        None => println!("No ready items"),
+    // One guard for the whole match: `Store::connection` is not reentrant, and a match
+    // scrutinee keeps its temporary alive across every arm.
+    let conn = store.connection();
+    match crate::store::next_item(&conn, &project, args.label.as_deref())? {
+        Some(item) => print_item(&item, &crate::store::list_events(&conn, &item.id, Some(10))?),
+        None => {
+            println!("No ready items in project '{project}'");
+            let elsewhere = ready_elsewhere(&conn, &project)?;
+            if !elsewhere.is_empty() {
+                println!("Ready items exist in: {} (use --project <name>)", elsewhere.join(", "));
+            }
+        }
     }
     Ok(())
+}
+
+/// Other projects that hold ready items, so an empty result never reads as "nothing to do".
+fn ready_elsewhere(conn: &rusqlite::Connection, project: &str) -> Result<Vec<String>> {
+    let filter = ItemFilter { status: Some(Status::Ready), ..ItemFilter::default() };
+    let mut projects: Vec<String> = crate::store::list_items(conn, &filter)?
+        .into_iter()
+        .map(|item| item.project)
+        .filter(|candidate| candidate != project)
+        .collect();
+    projects.sort();
+    projects.dedup();
+    Ok(projects)
 }
 
 fn handle_serve(args: ServeArgs) -> Result<()> {
@@ -230,6 +264,23 @@ fn detect_project(explicit: Option<String>) -> Result<String> {
     dir.file_name().and_then(|name| name.to_str()).map(str::to_owned).ok_or_else(|| anyhow!("cannot detect project name from current directory"))
 }
 
+/// `-p` is `--project`; `-p high` used to file the item under a project literally named
+/// "high" and silently lose the intended priority.
+fn create_project(explicit: Option<String>) -> Result<String> {
+    const RESERVED: [&str; 11] = [
+        "critical", "high", "medium", "low", "backlog", "ready", "active", "review", "done",
+        "blocked", "rejected",
+    ];
+    if let Some(project) = explicit.as_deref()
+        && RESERVED.contains(&project.to_ascii_lowercase().as_str())
+    {
+        return Err(anyhow!(
+            "-p/--project got '{project}', which is a priority/status name, not a project. Priority is --priority {project} and status is set with `item update --status`."
+        ));
+    }
+    detect_project(explicit)
+}
+
 fn repo_path() -> Result<String> {
     Ok(env::current_dir()?
         .into_os_string()
@@ -239,15 +290,4 @@ fn repo_path() -> Result<String> {
 
 fn board_dir() -> Result<std::path::PathBuf> {
     env::var_os("HOME").map(std::path::PathBuf::from).map(|path| path.join(".ai-board")).ok_or_else(|| anyhow!("HOME is not set"))
-}
-
-fn item_filter(
-    project: Option<String>,
-    status: Option<Status>,
-    priority: Option<Priority>,
-    label: Option<String>,
-    assignee: Option<String>,
-    limit: usize,
-) -> Result<ItemFilter> {
-    Ok(ItemFilter { status, priority, label, assignee, parent_id: None, project: Some(detect_project(project)?), repo_path: None, limit: Some(limit) })
 }

@@ -119,6 +119,9 @@ impl CreateArgs {
 pub struct ListArgs {
     #[arg(long, short)]
     pub project: Option<String>,
+    /// List items from every project instead of the current one
+    #[arg(long, short = 'A', conflicts_with = "project")]
+    pub all: bool,
     #[arg(long, short = 's')]
     pub status: Option<Status>,
     #[arg(long)]

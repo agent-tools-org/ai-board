@@ -41,6 +41,9 @@ impl Store {
         Self::open(&path)
     }
 
+    /// Not reentrant: a second call while a guard is alive deadlocks the process.
+    /// Bind the guard to a local before a `match`/`if let` — a scrutinee temporary
+    /// stays alive for every arm.
     pub fn connection(&self) -> MutexGuard<'_, Connection> {
         lock_connection(&self.conn)
     }
@@ -104,6 +107,24 @@ mod tests {
         assert_eq!(foreign_keys, 1);
 
         drop(store);
+        cleanup_db_files(&path);
+    }
+
+    #[test]
+    fn second_connection_blocks_while_a_guard_is_alive() {
+        // Regression guard for `ai-board next`, which locked once in the match scrutinee
+        // and again in the matched arm and hung forever on its own guard.
+        let path = test_db_path();
+        let store = Store::open(&path).expect("open store");
+
+        let guard = store.connection();
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| drop(store.connection()));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(!waiter.is_finished(), "connection() must be treated as non-reentrant");
+            drop(guard);
+        });
+
         cleanup_db_files(&path);
     }
 

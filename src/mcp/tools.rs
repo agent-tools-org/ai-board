@@ -71,7 +71,7 @@ impl McpServer {
         let project = params.project.unwrap_or_else(detect_project);
         self.store.with_connection(|conn| match next_item(conn, &project, params.label.as_deref())? {
             Some(item) => pretty_json(&item),
-            None => Ok("No ready items".to_owned()),
+            None => Ok(format!("No ready items in project '{project}'")),
         }).map_err(tool_error)
     }
 
