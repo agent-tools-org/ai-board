@@ -94,7 +94,7 @@ fn cors_layer() -> CorsLayer {
             origin
                 .to_str()
                 .ok()
-                .is_some_and(|value| is_localhost_origin(value))
+                .is_some_and(is_localhost_origin)
         }))
 }
 

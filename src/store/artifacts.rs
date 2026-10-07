@@ -84,7 +84,7 @@ pub fn check_gate(conn: &Connection, item_id: &str, target_status: Status) -> Re
 pub fn gen_artifact_id() -> String { format!("af-{:04x}", rand::rng().random::<u16>()) }
 
 fn required_gate(ok: bool, missing: &str) -> GateResult {
-    GateResult { allowed: ok, missing: (!ok).then(|| vec![missing.to_owned()]).unwrap_or_default() }
+    GateResult { allowed: ok, missing: if ok { Vec::new() } else { vec![missing.to_owned()] } }
 }
 
 fn has_final_design(conn: &Connection, item_id: &str) -> Result<bool> {

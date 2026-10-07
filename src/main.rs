@@ -276,10 +276,10 @@ fn validate_project(project: String) -> Result<String> {
 }
 
 fn repo_path() -> Result<String> {
-    Ok(env::current_dir()?
+    env::current_dir()?
         .into_os_string()
         .into_string()
-        .map_err(|_| anyhow!("current directory is not valid UTF-8"))?)
+        .map_err(|_| anyhow!("current directory is not valid UTF-8"))
 }
 
 fn board_dir() -> Result<std::path::PathBuf> {
